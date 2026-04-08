@@ -20,6 +20,7 @@ import {MyMessage} from '@appManagers/appMessagesManager';
 import {MyPhoto} from '@appManagers/appPhotosManager';
 import canSaveMessageMedia from '@appManagers/utils/messages/canSaveMessageMedia';
 import getMediaFromMessage from '@appManagers/utils/messages/getMediaFromMessage';
+import {appSettings} from '@stores/appSettings';
 import wrapRichText from '@richTextProcessor/wrapRichText';
 import {MediaSearchContext} from '@components/appMediaPlaybackController';
 import AppMediaViewerBase, {MEDIA_VIEWER_CLASSNAME} from '@components/appMediaViewerBase';
@@ -406,7 +407,11 @@ export default class AppMediaViewer extends AppMediaViewerBase<'caption', 'delet
     const noForwards = await this.managers.appPeersManager.noForwards(message.peerId);
     const isServiceMessage = message._ === 'messageService';
     const cantForwardMessage = isServiceMessage || noAuthor || !(await this.managers.appMessagesManager.canForward(message));
-    const cantDownloadMessage = (isServiceMessage ? noForwards : cantForwardMessage && !isSponsored) || !canSaveMessageMedia(message, noForwards);
+    const allowDownload = appSettings.exportedSelfDestructMedia && !!media;
+    const cantDownloadMessage = !allowDownload && (
+      (isServiceMessage ? noForwards : cantForwardMessage && !isSponsored) ||
+      !canSaveMessageMedia(message, noForwards)
+    );
     const a: [(HTMLElement | ButtonMenuItemOptionsVerifiable)[], boolean][] = [
       [[this.buttons.forward, this.btnMenuForward], cantForwardMessage],
       [[this.buttons.download, this.btnMenuDownload], cantDownloadMessage],

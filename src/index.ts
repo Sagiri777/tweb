@@ -52,6 +52,7 @@ import PopupElement from '@components/popups';
 import PasscodeLockScreenController from '@components/passcodeLock/passcodeLockScreenController'; PasscodeLockScreenController;
 import type {LangPackDifference} from '@layer';
 import commonStateStorage from '@lib/commonStateStorage';
+import {installGlobalNetworkProxy} from '@lib/networkProxy';
 import {MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, SIDEBAR_COLLAPSE_FACTOR} from '@components/sidebarLeft/constants';
 import useHasFoldersSidebar, {useIsSidebarCollapsed} from '@stores/foldersSidebar';
 import appNavigationController from '@components/appNavigationController';
@@ -68,6 +69,7 @@ import {preventCrossTabDynamicImportDeadlock} from '@helpers/preventDeadlock';
 //   })();
 // }
 
+installGlobalNetworkProxy();
 
 IMAGE_MIME_TYPES_SUPPORTED_PROMISE.then((mimeTypes) => {
   mimeTypes.forEach((mimeType) => {

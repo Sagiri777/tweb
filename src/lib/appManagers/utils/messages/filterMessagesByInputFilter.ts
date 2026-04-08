@@ -9,6 +9,7 @@ import type {MyInputMessagesFilter, MyMessage} from '@appManagers/appMessagesMan
 import {Message, MessageMedia, MessageEntity, MessageAction, Reaction} from '@layer';
 import matchUrl from '@lib/richTextProcessor/matchUrl';
 import reactionsEqual from '@appManagers/utils/reactions/reactionsEqual';
+import hasVisibleMessageMedia from './hasVisibleMessageMedia';
 
 export default function filterMessagesByInputFilter({
   inputFilter,
@@ -123,7 +124,7 @@ export default function filterMessagesByInputFilter({
     if(neededFlags?.some((flag) => (message as any as Message.message).pFlags[flag])) {
       found = true;
     } else if(message._ === 'message') {
-      if(message.media && neededContents[message.media._] && !(message.media as MessageMedia.messageMediaPhoto).ttl_seconds/*  && !message.fwd_from */) {
+      if(message.media && neededContents[message.media._] && hasVisibleMessageMedia(message)/*  && !message.fwd_from */) {
         const doc = (message.media as MessageMedia.messageMediaDocument).document as MyDocument;
         if(doc &&
           (

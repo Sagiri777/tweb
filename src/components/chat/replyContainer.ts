@@ -23,6 +23,7 @@ import limitSymbols from '@helpers/string/limitSymbols';
 import wrapEmojiText from '@lib/richTextProcessor/wrapEmojiText';
 import wrapMediaSpoiler from '@components/wrappers/mediaSpoiler';
 import {isMessageSensitive} from '@appManagers/utils/messages/isMessageRestricted';
+import hasVisibleMessageMedia from '@appManagers/utils/messages/hasVisibleMessageMedia';
 
 const MEDIA_SIZE = 32;
 
@@ -81,7 +82,7 @@ export async function wrapReplyDivAndCaption(options: {
 
   let setMedia = false, isRound = false;
   const mediaChildren = mediaEl ? Array.from(mediaEl.children).slice() : [];
-  if(messageMedia && mediaEl && !(messageMedia as MessageMedia.messageMediaPhoto).ttl_seconds) {
+  if(messageMedia && mediaEl && hasVisibleMessageMedia(message)) {
     messageMedia = (messageMedia as MessageMedia.messageMediaWebPage).webpage as WebPage.webPage || messageMedia;
     const photo = (messageMedia as MessageMedia.messageMediaPhoto).photo as Photo.photo;
     const document = (messageMedia as MessageMedia.messageMediaDocument).document as Document.document;

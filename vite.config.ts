@@ -10,9 +10,13 @@ import checker from 'vite-plugin-checker';
 import autoprefixer from 'autoprefixer';
 import {resolve} from 'path';
 import {existsSync, copyFileSync} from 'fs';
-import {ServerOptions} from 'vite';
+import {ServerOptions, ViteDevServer} from 'vite';
 import {watchLangFile} from './watch-lang.js';
 import path from 'path';
+import {createRequire} from 'module';
+
+const require = createRequire(import.meta.url);
+const {attachNetworkProxy} = require('./networkProxyServer.js');
 
 const rootDir = resolve(__dirname);
 const certsDir = path.join(rootDir, 'certs');
@@ -103,7 +107,25 @@ if(USE_OWN_SOLID) {
 }
 
 export default defineConfig({
+  optimizeDeps: {
+    include: [
+      '@cryptography/aes',
+      'big-integer',
+      'fast-png',
+      'fflate',
+      'hls.js',
+      'js-md5',
+      'mp4-muxer',
+      'tinyld'
+    ]
+  },
   plugins: [
+    {
+      name: 'tweb-network-proxy',
+      configureServer(server: ViteDevServer) {
+        attachNetworkProxy(server.middlewares, server.httpServer);
+      }
+    },
     // devtools({
     //   /* features options - all disabled by default */
     //   autoname: true // e.g. enable autoname

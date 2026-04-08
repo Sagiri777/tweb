@@ -48,6 +48,7 @@ export type AutoDownloadPeerTypeSettings = {
 
 export type StateSettings = {
   messagesTextSize: number,
+  exportedSelfDestructMedia: boolean,
   distanceUnit: 'kilometers' | 'miles',
   sendShortcut: 'enter' | 'ctrlEnter',
   animationsEnabled?: boolean, // ! DEPRECATED
@@ -294,6 +295,7 @@ const makeDefaultAppTheme = (
 
 export const SETTINGS_INIT: StateSettings = {
   messagesTextSize: 16,
+  exportedSelfDestructMedia: false,
   distanceUnit: 'kilometers',
   sendShortcut: 'enter',
   autoDownload: {

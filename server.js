@@ -3,6 +3,7 @@ const express = require('express');
 const https = require('https');
 const http = require('http');
 const fs = require('fs');
+const {attachNetworkProxy} = require('./networkProxyServer.js');
 
 const app = express();
 
@@ -33,6 +34,9 @@ if(!useHttp) {
   options.cert = fs.readFileSync(__dirname + '/certs/server-cert.pem');
 }
 
-server.createServer(options, app).listen(port, () => {
+const httpServer = server.createServer(options, app);
+attachNetworkProxy(app, httpServer);
+
+httpServer.listen(port, () => {
   console.log('Listening port:', port, 'folder:', publicFolderName);
 });

@@ -85,6 +85,7 @@ import noop from '@helpers/noop';
 import {isSensitive} from '@helpers/restrictions';
 import {hasSensitiveSpoiler} from '@components/wrappers/mediaSpoiler';
 import {useIsFrozen} from '@stores/appState';
+import {appSettings} from '@stores/appSettings';
 import prepareTextWithEntitiesForCopying from '@helpers/prepareTextWithEntitiesForCopying';
 import {runWithHotReloadGuard} from '@lib/solidjs/runWithHotReloadGuard';
 import {PartialByKeys} from '@types';
@@ -1165,8 +1166,29 @@ export default class ChatContextMenu {
       return message.some((message) => ChatContextMenu.canDownload(message, withTarget, noForwards, container));
     }
 
+    if(appSettings.exportedSelfDestructMedia) {
+      const media = getMediaFromMessage(message as Message.message, true);
+      if(!media) {
+        return false;
+      }
+
+      if(container && (message as Message.message).restriction_reason && isSensitive((message as Message.message).restriction_reason)) {
+        const item = container.querySelector(`[data-mid="${message.mid}"]`);
+        return item && !hasSensitiveSpoiler(item as HTMLElement);
+      }
+
+      return true;
+    }
+
     if(!canSaveMessageMedia(message, noForwards)) {
       return false;
+    }
+
+    const media = getMediaFromMessage(message as Message.message, true);
+    if(appSettings.exportedSelfDestructMedia) {
+      if(!media) {
+        return false;
+      }
     }
 
     const photo = ((message as Message.message).media as MessageMedia.messageMediaPhoto)?.photo as Photo.photo;
@@ -1178,14 +1200,21 @@ export default class ChatContextMenu {
       isGoodType = true;
     } else {
       if(!document) {
-        return false;
+        if(appSettings.exportedSelfDestructMedia) {
+          isGoodType = !!media;
+        } else {
+          return false;
+        }
+      } else {
+        // isGoodType = doc.type && (['gif', 'video', 'audio', 'voice', 'sticker'] as MyDocument['type'][]).includes(doc.type)
+        isGoodType = true;
       }
-
-      // isGoodType = doc.type && (['gif', 'video', 'audio', 'voice', 'sticker'] as MyDocument['type'][]).includes(doc.type)
-      isGoodType = true;
     }
 
     let hasTarget = !withTarget || !!IS_TOUCH_SUPPORTED;
+    if(appSettings.exportedSelfDestructMedia) {
+      hasTarget = true;
+    }
 
     if(isGoodType && withTarget) {
       hasTarget ||= !!(findUpClassName(withTarget, 'document') ||

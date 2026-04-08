@@ -78,6 +78,7 @@ import getMainGroupedMessage from '@appManagers/utils/messages/getMainGroupedMes
 import getUnreadReactions from '@appManagers/utils/messages/getUnreadReactions';
 import isMentionUnread from '@appManagers/utils/messages/isMentionUnread';
 import canMessageHaveFactCheck from '@appManagers/utils/messages/canMessageHaveFactCheck';
+import hasVisibleMessageMedia, {isUnlockedSelfDestructMedia} from '@appManagers/utils/messages/hasVisibleMessageMedia';
 import commonStateStorage from '@lib/commonStateStorage';
 import PaidMessagesQueue from '@appManagers/utils/messages/paidMessagesQueue';
 import type {ConfirmedPaymentResult} from '@components/chat/paidMessagesInterceptor';
@@ -6457,6 +6458,11 @@ export class AppMessagesManager extends AppManager {
       return Promise.resolve();
     }
 
+    msgIds = msgIds.filter((mid) => {
+      const message = this.getMessageByPeer(peerId, mid);
+      return !message || !isUnlockedSelfDestructMedia(message);
+    });
+
     if(!msgIds.length) {
       return Promise.resolve();
     }
@@ -7768,7 +7774,10 @@ export class AppMessagesManager extends AppManager {
           }
         }
 
-        if(((message as Message.message).media as MessageMedia.messageMediaPhoto)?.ttl_seconds) {
+        if(
+          ((message as Message.message).media as MessageMedia.messageMediaPhoto)?.ttl_seconds &&
+          !hasVisibleMessageMedia(message)
+        ) {
           message = this.modifyMessage(message, (message) => {
             delete ((message as Message.message).media as MessageMedia.messageMediaPhoto).photo;
             delete ((message as Message.message).media as MessageMedia.messageMediaDocument).document;
@@ -10096,10 +10105,17 @@ export class AppMessagesManager extends AppManager {
   }
 
   public canForward(message: Message.message | Message.messageService) {
-    return message?._ === 'message' &&
-      !(message as Message.message).pFlags.noforwards &&
-      !(message.media as MessageMedia.messageMediaPhoto)?.ttl_seconds &&
-      !this.appPeersManager.noForwards(message.peerId);
+    if(message?._ !== 'message' || (message as Message.message).pFlags.noforwards) {
+      return false;
+    }
+
+    const media = (message as Message.message).media as MessageMedia;
+    if((media as MessageMedia.messageMediaPhoto)?.ttl_seconds &&
+      !isUnlockedSelfDestructMedia(message as Message.message)) {
+      return false;
+    }
+
+    return !this.appPeersManager.noForwards(message.peerId);
   }
 
   private pushBatchUpdate<E extends keyof BatchUpdates, C extends BatchUpdates[E]>(

@@ -57,6 +57,7 @@ import choosePhotoSize from '@appManagers/utils/photos/choosePhotoSize';
 import wrapMessageForReply, {WrapMessageForReplyOptions} from '@components/wrappers/messageForReply';
 import isMessageRestricted, {isMessageSensitive} from '@appManagers/utils/messages/isMessageRestricted';
 import getMediaFromMessage from '@appManagers/utils/messages/getMediaFromMessage';
+import hasVisibleMessageMedia from '@appManagers/utils/messages/hasVisibleMessageMedia';
 import getMessageSenderPeerIdOrName from '@appManagers/utils/messages/getMessageSenderPeerIdOrName';
 import wrapStickerEmoji from '@components/wrappers/stickerEmoji';
 import getProxiedManagers from '@lib/getProxiedManagers';
@@ -2118,7 +2119,7 @@ export class AppDialogsManager {
       if(lastMessage && !draftMessage && !isRestricted) {
         const media = getMediaFromMessage(lastMessage, true);
         const videoTypes: Set<MyDocument['type']> = new Set(['video', 'gif', 'round']);
-        if(media && (media._ === 'photo' || videoTypes.has(media.type)) && !(((lastMessage as Message.message).media) as MessageMedia.messageMediaPhoto)?.ttl_seconds) {
+        if(media && (media._ === 'photo' || videoTypes.has(media.type)) && hasVisibleMessageMedia(lastMessage)) {
           const spoiler = ((lastMessage as Message.message).media as MessageMedia.messageMediaPhoto | MessageMedia.messageMediaDocument)?.pFlags?.spoiler;
           const size = choosePhotoSize(media, 20, 20);
 

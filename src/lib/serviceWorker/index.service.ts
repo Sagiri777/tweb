@@ -28,6 +28,7 @@ import DeferredIsUsingPasscode from '@lib/passcode/deferredIsUsingPasscode';
 import {onBackgroundsFetch} from '@lib/serviceWorker/backgrounds';
 import {watchMtprotoOnDev} from '@lib/serviceWorker/watchMtprotoOnDev';
 import {watchCacheStoragesLifetime} from './clearOldCache';
+import {installGlobalNetworkProxy} from '@lib/networkProxy';
 
 // #if MTPROTO_SW
 // import '../mtproto/mtproto.worker';
@@ -35,6 +36,8 @@ import {watchCacheStoragesLifetime} from './clearOldCache';
 
 export const log = logger('SW', LogTypes.Error | LogTypes.Debug | LogTypes.Log | LogTypes.Warn, true);
 const ctx = self as any as ServiceWorkerGlobalScope;
+
+installGlobalNetworkProxy();
 
 // #if !MTPROTO_SW
 let _mtprotoMessagePort: MessagePort;

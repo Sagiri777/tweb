@@ -159,6 +159,24 @@ export default class AppGeneralSettingsTab extends SliderSuperTabEventable {
         listenerSetter: this.listenerSetter
       });
 
+      const exportedSelfDestructMediaCheckboxField = new CheckboxField({
+        toggle: true,
+        checked: appSettings.exportedSelfDestructMedia,
+        listenerSetter: this.listenerSetter
+      });
+
+      this.listenerSetter.add(exportedSelfDestructMediaCheckboxField.input)('change', () => {
+        setAppSettings('exportedSelfDestructMedia', exportedSelfDestructMediaCheckboxField.checked);
+      });
+
+      const exportedSelfDestructMediaRow = new Row({
+        title: 'Preserve exported self-destruct media',
+        subtitle: 'Allow viewing and saving exported self-destruct files without syncing deletion.',
+        checkboxField: exportedSelfDestructMediaCheckboxField,
+        havePadding: true,
+        listenerSetter: this.listenerSetter
+      });
+
       onUpdate();
 
       this.listenerSetter.add(rootScope)('settings_updated', onUpdate);
@@ -167,7 +185,8 @@ export default class AppGeneralSettingsTab extends SliderSuperTabEventable {
         range.container,
         chatBackgroundButton,
         animationsRow.container,
-        liteModeRow.container
+        liteModeRow.container,
+        exportedSelfDestructMediaRow.container
       );
     }
 

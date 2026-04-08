@@ -224,6 +224,8 @@ import {NoForwardsRequestContent, NoForwardsRequestReplyMarkup} from '@component
 import tsNow from '@helpers/tsNow';
 import wrapMessageForReply from '@components/wrappers/messageForReply';
 import canSeeMessageMedia from '@lib/appManagers/utils/messages/canSeeMessageMedia';
+import hasVisibleMessageMedia, {isUnlockedSelfDestructMedia} from '@appManagers/utils/messages/hasVisibleMessageMedia';
+import {appSettings} from '@stores/appSettings';
 
 // TODO: fix new message won't be rendered if an old one is rendering in the moment
 
@@ -5898,7 +5900,9 @@ export default class ChatBubbles {
     };
 
     const isStoryMention = isMessage && !!(message.media as MessageMedia.messageMediaStory)?.pFlags?.via_mention;
-    const isSelfDestructingMedia = isMessage && !!(message.media as MessageMedia.messageMediaPhoto)?.ttl_seconds;
+    const isSelfDestructingMedia = isMessage &&
+      !!(message.media as MessageMedia.messageMediaPhoto)?.ttl_seconds &&
+      !hasVisibleMessageMedia(message);
     const regularAsService = isStoryMention || (isSelfDestructingMedia && !canSeeMessageMedia(message));
     let returnService: boolean;
 
@@ -8621,6 +8625,12 @@ export default class ChatBubbles {
       return false;
     }
 
+    const media = message.media as MessageMedia;
+    if((media as MessageMedia.messageMediaPhoto)?.ttl_seconds &&
+      !isUnlockedSelfDestructMedia(message)) {
+      return false;
+    }
+
     if(message.peerId.isUser()) {
       const userFull = this.chat.fullPeer() as UserFull;
       if(userFull?.pFlags?.noforwards_my_enabled || userFull?.pFlags?.noforwards_peer_enabled) {
@@ -9612,7 +9622,7 @@ export default class ChatBubbles {
         appendTo = this.container,
         method: 'append' | 'prepend' | 'replaceChildren' = 'append',
         elementsMethod: 'prepend' | 'replaceChildren' = 'prepend';
-      if(this.chat.isRestricted) {
+      if(this.chat.isRestricted && !appSettings.exportedSelfDestructMedia) {
         renderPromise = this.renderEmptyPlaceholder('restricted', bubble, message, elements);
       } else if(isSponsored) {
         bubble.classList.add('avoid-selection');

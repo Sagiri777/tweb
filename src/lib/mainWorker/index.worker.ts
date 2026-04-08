@@ -9,6 +9,7 @@ import '@lib/polyfill';
 import '@helpers/peerIdPolyfill';
 
 import cryptoWorker from '@lib/crypto/cryptoMessagePort';
+import {installGlobalNetworkProxy} from '@lib/networkProxy';
 import {setEnvironment} from '@environment/utils';
 import transportController from '@lib/mtproto/transports/controller';
 import MTProtoMessagePort from '@lib/mainWorker/mainMessagePort';
@@ -32,6 +33,7 @@ import pushSingleManager from '@appManagers/pushSingleManager';
 import {createBroadcastChannelWrapper} from '@lib/broadcastChannelWrapper';
 import {MainBroadcastChannelEvents, unversionedMainBroadcastChannelName} from '@config/broadcastChannel';
 
+installGlobalNetworkProxy();
 
 const log = logger('MTPROTO');
 // let haveState = false;
