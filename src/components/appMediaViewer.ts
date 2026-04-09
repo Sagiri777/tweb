@@ -406,7 +406,10 @@ export default class AppMediaViewer extends AppMediaViewerBase<'caption', 'delet
     const noAuthor = isSponsored;
     const noForwards = await this.managers.appPeersManager.noForwards(message.peerId);
     const isServiceMessage = message._ === 'messageService';
-    const cantForwardMessage = isServiceMessage || noAuthor || !(await this.managers.appMessagesManager.canForward(message));
+    const cantForwardMessage = !(await this.managers.appMessagesManager.canForward(message)) || (
+      !appSettings.forwarding.sendAsCopy &&
+      (isServiceMessage || noAuthor)
+    );
     const allowDownload = appSettings.exportedSelfDestructMedia && !!media;
     const cantDownloadMessage = !allowDownload && (
       (isServiceMessage ? noForwards : cantForwardMessage && !isSponsored) ||

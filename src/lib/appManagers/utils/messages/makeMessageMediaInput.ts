@@ -1,9 +1,27 @@
-import {InputMedia, Message, MessageMedia} from '@layer';
+import {InputGeoPoint, InputMedia, InputPeer, MessageMedia} from '@layer';
 import getDocumentInput from '@appManagers/utils/docs/getDocumentInput';
 import getPhotoInput from '@appManagers/utils/photos/getPhotoInput';
+import rootScope from '@lib/rootScope';
+import getPeerId from '@appManagers/utils/peers/getPeerId';
 
-export function makeMessageMediaInput(media: MessageMedia): InputMedia | undefined {
+function makeInputGeoPoint(geo: MessageMedia.messageMediaGeo['geo']): InputGeoPoint {
+  if(!geo || geo._ !== 'geoPoint') {
+    return {_: 'inputGeoPointEmpty'};
+  }
+
+  return {
+    _: 'inputGeoPoint',
+    lat: geo.lat,
+    long: geo.long,
+    accuracy_radius: geo.accuracy_radius
+  };
+}
+
+export function makeMessageMediaInput(media: MessageMedia, options: Partial<{
+  preserveTtl: boolean
+}> = {}): InputMedia | undefined {
   if(!media) return;
+  const preserveTtl = options.preserveTtl ?? true;
 
   if(media._ === 'messageMediaPhoto' && media.photo?._ === 'photo') {
     return {
@@ -12,7 +30,7 @@ export function makeMessageMediaInput(media: MessageMedia): InputMedia | undefin
       pFlags: {
         spoiler: media.pFlags.spoiler
       },
-      ttl_seconds: media.ttl_seconds
+      ttl_seconds: preserveTtl ? media.ttl_seconds : undefined
     }
   }
 
@@ -24,7 +42,7 @@ export function makeMessageMediaInput(media: MessageMedia): InputMedia | undefin
         spoiler: media.pFlags.spoiler
       },
       video_cover: media.video_cover?._ === 'photo' ? getPhotoInput(media.video_cover) : undefined,
-      ttl_seconds: media.ttl_seconds
+      ttl_seconds: preserveTtl ? media.ttl_seconds : undefined
     }
   }
 
@@ -39,7 +57,70 @@ export function makeMessageMediaInput(media: MessageMedia): InputMedia | undefin
     }
   }
 
-  // Other types to be added...
+  if(media._ === 'messageMediaGeo') {
+    return {
+      _: 'inputMediaGeoPoint',
+      geo_point: makeInputGeoPoint(media.geo)
+    };
+  }
+
+  if(media._ === 'messageMediaVenue') {
+    return {
+      _: 'inputMediaVenue',
+      geo_point: makeInputGeoPoint(media.geo),
+      title: media.title,
+      address: media.address,
+      provider: media.provider,
+      venue_id: media.venue_id,
+      venue_type: media.venue_type
+    };
+  }
+
+  if(media._ === 'messageMediaGeoLive') {
+    return {
+      _: 'inputMediaGeoLive',
+      pFlags: {},
+      geo_point: makeInputGeoPoint(media.geo),
+      heading: media.heading,
+      period: media.period,
+      proximity_notification_radius: media.proximity_notification_radius
+    };
+  }
+
+  if(media._ === 'messageMediaPoll') {
+    const correctAnswers = media.results?.results
+      ?.filter((result) => result.pFlags?.correct)
+      .map((result) => result.option);
+
+    return rootScope.managers.appPollsManager.getInputMediaPoll(
+      media.poll,
+      correctAnswers?.length ? correctAnswers : undefined,
+      media.results?.solution,
+      media.results?.solution_entities
+    ) as unknown as InputMedia.inputMediaPoll;
+  }
+
+  if(media._ === 'messageMediaDice') {
+    return {
+      _: 'inputMediaDice',
+      emoticon: media.emoticon
+    };
+  }
+
+  if(media._ === 'messageMediaStory') {
+    return {
+      _: 'inputMediaStory',
+      peer: rootScope.managers.appPeersManager.getInputPeerById(getPeerId(media.peer)) as unknown as InputPeer,
+      id: media.id
+    };
+  }
+
+  if(media._ === 'messageMediaToDo') {
+    return {
+      _: 'inputMediaTodo',
+      todo: media.todo
+    };
+  }
 }
 
 export function makeMessageMediaInputForSuggestedPost(media: MessageMedia) {

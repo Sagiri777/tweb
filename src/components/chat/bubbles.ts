@@ -8621,7 +8621,15 @@ export default class ChatBubbles {
   }
 
   public canForward(message: Message.message | Message.messageService) {
-    if(message?._ !== 'message' || message.pFlags.noforwards) {
+    if(!message) {
+      return false;
+    }
+
+    if(appSettings.forwarding.sendAsCopy) {
+      return true;
+    }
+
+    if(message._ !== 'message' || message.pFlags.noforwards) {
       return false;
     }
 

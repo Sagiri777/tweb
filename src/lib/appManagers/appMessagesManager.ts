@@ -87,15 +87,18 @@ import getPhotoInput from '@appManagers/utils/photos/getPhotoInput';
 import {BatchProcessor} from '@helpers/sortedList';
 import {increment, MonoforumDialog} from '@lib/storages/monoforumDialogs';
 import formatStarsAmount from '@appManagers/utils/payments/formatStarsAmount';
-import {makeMessageMediaInputForSuggestedPost} from '@appManagers/utils/messages/makeMessageMediaInput';
+import {makeMessageMediaInput, makeMessageMediaInputForSuggestedPost} from '@appManagers/utils/messages/makeMessageMediaInput';
 import createObservedState, {wrapObject} from '@helpers/createObservedState';
 import createHistoryStorage, {createHistoryStorageSearchSlicedArray} from '@appManagers/utils/messages/createHistoryStorage';
 import {isTempId} from '@appManagers/utils/messages/isTempId';
+import shouldResendForwardAsCopy from '@appManagers/utils/messages/shouldResendForwardAsCopy';
 import fitSymbols from '@helpers/string/fitSymbols';
 import isObject from '@helpers/object/isObject';
 import pickKeys from '@helpers/object/pickKeys';
 import namedPromises from '@helpers/namedPromises';
 import callbackifyAll from '@helpers/callbackifyAll';
+import {appSettings} from '@stores/appSettings';
+import wrapMessageActionTextNew from '@components/wrappers/messageActionTextNew';
 import {createBotforumTopicFromAction} from './utils/dialogs/createBotforumTopicFromAction';
 
 // console.trace('include');
@@ -2365,6 +2368,8 @@ export class AppMessagesManager extends AppManager {
   public async sendOther(
     options: MessageSendingParams & Partial<{
       inputMedia: InputMedia | {_: 'messageMediaPending', messageMedia: MessageMedia},
+      text: string,
+      entities: MessageEntity[],
       viaBotId: BotId,
       replyMarkup: ReplyMarkup,
       clearDraft: true,
@@ -2380,6 +2385,16 @@ export class AppMessagesManager extends AppManager {
     const noOutgoingMessage = /* inputMedia?._ === 'inputMediaPhotoExternal' ||  */inputMedia?._ === 'inputMediaDocumentExternal';
     await this.checkSendOptions(options);
     const message = this.generateOutgoingMessage(peerId, options);
+    message.message = options.text || '';
+    message.entities = options.entities;
+    const geoPoint = (inputMedia as InputMedia.inputMediaGeoPoint | InputMedia.inputMediaVenue | InputMedia.inputMediaGeoLive).geo_point;
+    const outputGeo = geoPoint?._ === 'inputGeoPoint' ? {
+      _: 'geoPoint',
+      lat: geoPoint.lat,
+      long: geoPoint.long,
+      access_hash: '0',
+      accuracy_radius: geoPoint.accuracy_radius
+    } as GeoPoint.geoPoint : options.geoPoint;
 
     let media: MessageMedia;
     switch(inputMedia._) {
@@ -2438,7 +2453,7 @@ export class AppMessagesManager extends AppManager {
       case 'inputMediaGeoPoint': {
         media = {
           _: 'messageMediaGeo',
-          geo: options.geoPoint
+          geo: outputGeo
         };
         break;
       }
@@ -2446,12 +2461,23 @@ export class AppMessagesManager extends AppManager {
       case 'inputMediaVenue': {
         media = {
           _: 'messageMediaVenue',
-          geo: options.geoPoint,
+          geo: outputGeo,
           title: inputMedia.title,
           address: inputMedia.address,
           provider: inputMedia.provider,
           venue_id: inputMedia.venue_id,
           venue_type: inputMedia.venue_type
+        };
+        break;
+      }
+
+      case 'inputMediaGeoLive': {
+        media = {
+          _: 'messageMediaGeoLive',
+          geo: outputGeo,
+          heading: inputMedia.heading,
+          period: inputMedia.period,
+          proximity_notification_radius: inputMedia.proximity_notification_radius
         };
         break;
       }
@@ -3898,6 +3924,15 @@ export class AppMessagesManager extends AppManager {
     await this.checkSendOptions(options);
 
     const {peerId, fromPeerId, mids} = options;
+    const shouldCopy = mids.some((mid) => {
+      const message = this.getMessageByPeer(fromPeerId, mid) as Message.message;
+      return shouldResendForwardAsCopy(message, message ? this.appPeersManager.noForwards(message.peerId) : false);
+    });
+
+    if(shouldCopy) {
+      return this.copyMessages(options);
+    }
+
     const channelId = this.appPeersManager.isChannel(fromPeerId) ? fromPeerId.toChatId() : undefined;
     const splitted = this.appMessagesIdsManager.splitMessageIdsByChannels(mids, channelId);
     const promises = splitted.map(([_channelId, {mids}]) => {
@@ -3910,6 +3945,106 @@ export class AppMessagesManager extends AppManager {
     });
 
     return Promise.all(promises).then(noop);
+  }
+
+  public async copyMessages(options: MessageForwardParams) {
+    await this.checkSendOptions(options);
+
+    const {fromPeerId, mids} = options;
+    const sentGroupedIds = new Set<string | number>();
+
+    for(const mid of mids) {
+      const originalMessage = this.getMessageByPeer(fromPeerId, mid) as Message.message | Message.messageService;
+      if(!originalMessage) {
+        continue;
+      }
+
+      if(originalMessage._ === 'messageService') {
+        await this.sendText({
+          ...options,
+          text: await wrapMessageActionTextNew({
+            message: originalMessage,
+            plain: true,
+            noLinks: true,
+            noTextFormat: true
+          }),
+          clearDraft: undefined
+        });
+        continue;
+      }
+
+      if(originalMessage.grouped_id) {
+        if(sentGroupedIds.has(originalMessage.grouped_id)) {
+          continue;
+        }
+
+        sentGroupedIds.add(originalMessage.grouped_id);
+        const groupedMessages = mids
+        .map((groupMid) => this.getMessageByPeer(fromPeerId, groupMid) as Message.message)
+        .filter((message) => message?.grouped_id === originalMessage.grouped_id);
+
+        const groupedInputs = groupedMessages
+          .map((message) => ({message, inputMedia: makeMessageMediaInput(message.media, {preserveTtl: false})}))
+        .filter((entry) => entry.inputMedia && (
+          entry.inputMedia._ === 'inputMediaPhoto' ||
+          entry.inputMedia._ === 'inputMediaDocument'
+        ));
+
+        if(groupedInputs.length > 1) {
+          const inputPeer = this.appPeersManager.getInputPeerById(options.peerId);
+          const multiMedia = groupedInputs.map(({message, inputMedia}, idx) => ({
+            _: 'inputSingleMedia',
+            media: inputMedia,
+            random_id: randomLong(),
+            message: options.dropCaptions ? '' : (idx === 0 ? (message.message || '') : ''),
+            entities: options.dropCaptions ? undefined : (idx === 0 ? this.getInputEntities(message.entities) : undefined)
+          })) as InputSingleMedia[];
+
+          await this.apiManager.invokeApi('messages.sendMultiMedia', {
+            peer: inputPeer,
+            reply_to: options.replyTo,
+            schedule_date: options.scheduleDate,
+            silent: options.silent,
+            send_as: options.sendAsPeerId ? this.appPeersManager.getInputPeerById(options.sendAsPeerId) : undefined,
+            multi_media: multiMedia
+          }).then((updates) => {
+            this.apiUpdatesManager.processUpdateMessage(updates);
+          });
+
+          continue;
+        }
+      }
+
+      const media = originalMessage.media;
+      if(media?._ === 'messageMediaWebPage') {
+        await this.sendText({
+          ...options,
+          text: originalMessage.message || '',
+          entities: originalMessage.entities,
+          clearDraft: undefined
+        });
+        continue;
+      }
+
+      const inputMedia = makeMessageMediaInput(media, {preserveTtl: false});
+      if(inputMedia) {
+        await this.sendOther({
+          ...options,
+          inputMedia,
+          text: options.dropCaptions ? '' : (originalMessage.message || ''),
+          entities: options.dropCaptions ? undefined : originalMessage.entities,
+          clearDraft: undefined
+        });
+        continue;
+      }
+
+      await this.sendText({
+        ...options,
+        text: originalMessage.message || '',
+        entities: originalMessage.entities,
+        clearDraft: undefined
+      });
+    }
   }
 
   public generateEmptyMessage(mid: number): Message.message | Message.messageService {
@@ -10105,7 +10240,15 @@ export class AppMessagesManager extends AppManager {
   }
 
   public canForward(message: Message.message | Message.messageService) {
-    if(message?._ !== 'message' || (message as Message.message).pFlags.noforwards) {
+    if(!message) {
+      return false;
+    }
+
+    if(appSettings.forwarding.sendAsCopy) {
+      return true;
+    }
+
+    if(message._ !== 'message' || (message as Message.message).pFlags.noforwards) {
       return false;
     }
 

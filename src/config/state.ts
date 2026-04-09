@@ -93,6 +93,9 @@ export type StateSettings = {
   liteMode: {[key in LiteModeKey]: boolean},
   savedAsForum: boolean,
   notifyAllAccounts: boolean,
+  forwarding: {
+    sendAsCopy: boolean
+  },
   tabsInSidebar: boolean,
   seenTooltips: {
     storySound: boolean,
@@ -375,6 +378,9 @@ export const SETTINGS_INIT: StateSettings = {
   },
   savedAsForum: false,
   notifyAllAccounts: true,
+  forwarding: {
+    sendAsCopy: false
+  },
   tabsInSidebar: false,
   playbackParams: {
     volume: 1,

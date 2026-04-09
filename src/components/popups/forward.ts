@@ -13,16 +13,23 @@ import {toastNew} from '@components/toast';
 import PopupPickUser from '@components/popups/pickUser';
 import getMediaFromMessage from '@appManagers/utils/messages/getMediaFromMessage';
 import getDocumentInput from '@appManagers/utils/docs/getDocumentInput';
+import CheckboxField from '@components/checkboxField';
+import Row from '@components/row';
 import PopupElement from '.';
 import {useAppConfig, useIsFrozen} from '@stores/appState';
+import {appSettings} from '@stores/appSettings';
 import {Message, MessageMedia} from '@layer';
+import shouldResendForwardAsCopy from '@appManagers/utils/messages/shouldResendForwardAsCopy';
 
 export default class PopupForward extends PopupPickUser {
+  private sendAsCopy: boolean;
+
   constructor(
     peerIdMids?: {[fromPeerId: PeerId]: number[]},
     onSelect?: (peerId: PeerId, threadId?: number) => Promise<void> | void,
     chatRightsAction: ChatRights[] = ['send_plain'],
-    noTopics?: boolean
+    noTopics?: boolean,
+    forceSendAsCopy = false
   ) {
     super({
       peerType: ['dialogs', 'contacts'],
@@ -51,7 +58,7 @@ export default class PopupForward extends PopupPickUser {
                 continue;
               }
             }
-            this.managers.appMessagesManager.forwardMessages({
+            this.managers.appMessagesManager[this.sendAsCopy ? 'copyMessages' : 'forwardMessages']({
               peerId,
               fromPeerId: fromPeerId.toPeerId(),
               mids
@@ -66,7 +73,7 @@ export default class PopupForward extends PopupPickUser {
         }
 
         await appImManager.setInnerPeer({peerId, threadId, monoforumThreadId});
-        appImManager.chat.input.initMessagesForward(peerIdMids);
+        appImManager.chat.input.initMessagesForward(peerIdMids, this.sendAsCopy);
       },
       placeholder: 'ShareModal.Search.ForwardPlaceholder',
       chatRightsActions: chatRightsAction,
@@ -86,6 +93,30 @@ export default class PopupForward extends PopupPickUser {
         headerLangPackKey: 'Forward'
       })
     });
+
+    this.sendAsCopy = forceSendAsCopy || appSettings.forwarding.sendAsCopy;
+
+    const checkboxField = new CheckboxField({
+      checked: this.sendAsCopy,
+      disabled: forceSendAsCopy,
+      listenerSetter: this.listenerSetter
+    });
+
+    this.listenerSetter.add(checkboxField.input)('change', () => {
+      this.sendAsCopy = checkboxField.checked;
+    });
+
+    const row = new Row({
+      title: 'Forward without source',
+      subtitle: forceSendAsCopy ?
+        'This selection must be resent as a new message from you.' :
+        'Temporarily resend this forward as a new message from you.',
+      checkboxField,
+      havePadding: true,
+      listenerSetter: this.listenerSetter
+    });
+
+    this.body.prepend(row.container);
   }
 
   public static async create(...args: ConstructorParameters<typeof PopupForward>) {
@@ -151,6 +182,13 @@ export default class PopupForward extends PopupPickUser {
       }
     });
 
-    PopupElement.createPopup(PopupForward, args[0], args[1], Array.from(actions));
+    const forceSendAsCopy = (await Promise.all(messages.map(async(message) => {
+      return shouldResendForwardAsCopy(
+        message as Message.message,
+        message ? await rootScope.managers.appPeersManager.noForwards(message.peerId) : false
+      );
+    }))).some(Boolean);
+
+    PopupElement.createPopup(PopupForward, args[0], args[1], Array.from(actions), undefined, forceSendAsCopy);
   }
 }

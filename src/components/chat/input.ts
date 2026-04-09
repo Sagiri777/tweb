@@ -118,6 +118,7 @@ import PopupPremium from '@components/popups/premium';
 import PopupPickUser from '@components/popups/pickUser';
 import getPeerId from '@appManagers/utils/peers/getPeerId';
 import {isSavedDialog} from '@appManagers/utils/dialogs/isDialog';
+import {appSettings} from '@stores/appSettings';
 import getFwdFromName from '@appManagers/utils/messages/getFwdFromName';
 import apiManagerProxy from '@lib/apiManagerProxy';
 import eachSecond from '@helpers/eachSecond';
@@ -258,6 +259,7 @@ export default class ChatInput {
   public willSendWebPage: WebPage = null;
   public webPageOptions: Parameters<AppMessagesManager['sendText']>[0]['webPageOptions'] = {};
   private forwarding: {[fromPeerId: PeerId]: number[]};
+  private forwardingSendAsCopy: boolean;
   public replyToMsgId: MessageSendingParams['replyToMsgId'];
   public replyToStoryId: MessageSendingParams['replyToStoryId'];
   public replyToQuote: MessageSendingParams['replyToQuote'];
@@ -3988,7 +3990,7 @@ export default class ChatInput {
             continue;
           }
         }
-        this.managers.appMessagesManager.forwardMessages({
+        this.managers.appMessagesManager[(this.forwardingSendAsCopy ?? appSettings.forwarding.sendAsCopy) ? 'copyMessages' : 'forwardMessages']({
           ...sendingParams,
           fromPeerId: fromPeerId.toPeerId(),
           mids,
@@ -4176,7 +4178,7 @@ export default class ChatInput {
     }
   }
 
-  public initMessagesForward(fromPeerIdsMids: {[fromPeerId: PeerId]: number[]}) {
+  public initMessagesForward(fromPeerIdsMids: {[fromPeerId: PeerId]: number[]}, sendAsCopy = appSettings.forwarding.sendAsCopy) {
     const f = async() => {
       // const peerTitles: string[]
       const fromPeerIds = Object.keys(fromPeerIdsMids).map((fromPeerId) => fromPeerId.toPeerId());
@@ -4290,6 +4292,7 @@ export default class ChatInput {
 
       this.setCurrentHover(this.forwardHover, newReply);
       this.forwarding = fromPeerIdsMids;
+      this.forwardingSendAsCopy = sendAsCopy;
     };
 
     f();
@@ -4405,6 +4408,7 @@ export default class ChatInput {
     if(type !== 'reply') {
       this.setReplyTo(undefined);
       this.forwarding = undefined;
+      this.forwardingSendAsCopy = undefined;
     }
 
     if(type !== 'suggested') {

@@ -972,7 +972,7 @@ export default class ChatContextMenu {
       verify: () => !this.noForwards &&
         this.chat.type !== ChatType.Scheduled &&
         (!this.message.pFlags.is_outgoing || this.message.fromId === SERVICE_PEER_ID) &&
-        this.message._ !== 'messageService'
+        (appSettings.forwarding.sendAsCopy || this.message._ !== 'messageService')
     }, {
       icon: 'forward',
       text: 'Message.Context.Selection.Forward',

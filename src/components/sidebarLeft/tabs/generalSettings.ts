@@ -177,6 +177,24 @@ export default class AppGeneralSettingsTab extends SliderSuperTabEventable {
         listenerSetter: this.listenerSetter
       });
 
+      const forwardAsCopyCheckboxField = new CheckboxField({
+        toggle: true,
+        checked: appSettings.forwarding.sendAsCopy,
+        listenerSetter: this.listenerSetter
+      });
+
+      this.listenerSetter.add(forwardAsCopyCheckboxField.input)('change', () => {
+        setAppSettings('forwarding', 'sendAsCopy', forwardAsCopyCheckboxField.checked);
+      });
+
+      const forwardAsCopyRow = new Row({
+        title: 'Forward as your own message',
+        subtitle: 'Resend forwarded content as a new message from you instead of using Telegram forwarding.',
+        checkboxField: forwardAsCopyCheckboxField,
+        havePadding: true,
+        listenerSetter: this.listenerSetter
+      });
+
       onUpdate();
 
       this.listenerSetter.add(rootScope)('settings_updated', onUpdate);
@@ -186,7 +204,8 @@ export default class AppGeneralSettingsTab extends SliderSuperTabEventable {
         chatBackgroundButton,
         animationsRow.container,
         liteModeRow.container,
-        exportedSelfDestructMediaRow.container
+        exportedSelfDestructMediaRow.container,
+        forwardAsCopyRow.container
       );
     }
 
