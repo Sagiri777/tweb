@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "preinstall": "npx only-allow pnpm",
-    "start": "vite",
+    "start": "node ./start-dev.js",
+    "start:vite": "vite",
     "start-in-docker": "vite --host",
     "serve": "pnpm run build; node server.js",
     "build": "pnpm run generate-changelog && vite build",

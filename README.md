@@ -12,6 +12,7 @@ This will install all the needed dependencies.
 
 #### Running web-server
 Just run `pnpm start` to start the web server and the livereload task.
+When running in an interactive terminal, the startup script will ask whether to enable the network proxy and let you override the proxy URL.
 Open http://localhost:8080/ in your browser.
 
 
