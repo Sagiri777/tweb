@@ -9,6 +9,7 @@ import EventListenerBase from '@helpers/eventListenerBase';
 
 const FOCUS_EVENT_NAME = IS_TOUCH_SUPPORTED ? 'touchstart' : 'mousemove';
 const DO_NOT_IDLE = false;
+const HAS_WINDOW = typeof window !== 'undefined';
 
 export class IdleController extends EventListenerBase<{
   change: (idle: boolean) => void
@@ -21,9 +22,13 @@ export class IdleController extends EventListenerBase<{
   constructor() {
     super();
 
-    this._isIdle = true;
+    this._isIdle = !HAS_WINDOW ? false : true;
     this.focusPromise = Promise.resolve();
     this.focusResolve = () => {};
+
+    if(!HAS_WINDOW) {
+      return;
+    }
 
     window.addEventListener('blur', () => {
       this.isIdle = true;

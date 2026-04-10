@@ -16,6 +16,8 @@ import {fastRaf} from '@helpers/schedulers';
 import {Middleware} from '@helpers/middleware';
 import safePlay from '@helpers/dom/safePlay';
 
+const HAS_INTERSECTION_OBSERVER = typeof IntersectionObserver !== 'undefined';
+
 export type AnimationItemGroup = '' | 'none' | 'chat' | 'lock' |
   'STICKERS-POPUP' | 'emoticons-dropdown' | 'STICKERS-SEARCH' | 'GIFS-SEARCH' |
   `CHAT-MENU-REACTIONS-${number}` | 'INLINE-HELPER' | 'GENERAL-SETTINGS' | 'STICKER-VIEWER' | 'EMOJI' |
@@ -45,7 +47,7 @@ export interface AnimationItemWrapper {
 };
 
 export class AnimationIntersector {
-  private observer: IntersectionObserver;
+  private observer?: IntersectionObserver;
   private visible: Set<AnimationItem>;
 
   private overrideIdleGroups: Set<string>;
@@ -58,53 +60,55 @@ export class AnimationIntersector {
   private videosLocked: boolean;
 
   constructor() {
-    this.observer = new IntersectionObserver((entries) => {
-      // if(rootScope.idle.isIDLE) return;
+    if(HAS_INTERSECTION_OBSERVER) {
+      this.observer = new IntersectionObserver((entries) => {
+        // if(rootScope.idle.isIDLE) return;
 
-      for(const entry of entries) {
-        const target = entry.target;
+        for(const entry of entries) {
+          const target = entry.target;
 
-        for(const group in this.byGroups) {
-          if(this.intersectionLockedGroups[group as AnimationItemGroup]) {
-            continue;
+          for(const group in this.byGroups) {
+            if(this.intersectionLockedGroups[group as AnimationItemGroup]) {
+              continue;
+            }
+
+            const animation = this.byGroups[group as AnimationItemGroup].find((p) => p.el === target);
+            if(!animation) {
+              continue;
+            }
+
+            if(entry.isIntersecting) {
+              this.visible.add(animation);
+              this.checkAnimation(animation, false);
+
+              /* if(animation instanceof HTMLVideoElement && animation.dataset.src) {
+                animation.src = animation.dataset.src;
+                animation.load();
+              } */
+            } else {
+              this.visible.delete(animation);
+              this.checkAnimation(animation, true);
+
+              const _animation = animation.animation;
+              if(
+                animation.type === 'lottie' &&
+                (_animation as RLottiePlayer).paused
+                /*  && animation.cachingDelta === 2 */
+              ) {
+                // console.warn('will clear cache', player);
+                (_animation as RLottiePlayer).clearCacheWhenSafe();
+              }/*  else if(animation instanceof HTMLVideoElement && animation.src) {
+                animation.dataset.src = animation.src;
+                animation.src = '';
+                animation.load();
+              } */
+            }
+
+            break;
           }
-
-          const animation = this.byGroups[group as AnimationItemGroup].find((p) => p.el === target);
-          if(!animation) {
-            continue;
-          }
-
-          if(entry.isIntersecting) {
-            this.visible.add(animation);
-            this.checkAnimation(animation, false);
-
-            /* if(animation instanceof HTMLVideoElement && animation.dataset.src) {
-              animation.src = animation.dataset.src;
-              animation.load();
-            } */
-          } else {
-            this.visible.delete(animation);
-            this.checkAnimation(animation, true);
-
-            const _animation = animation.animation;
-            if(
-              animation.type === 'lottie' &&
-              (_animation as RLottiePlayer).paused
-              /*  && animation.cachingDelta === 2 */
-            ) {
-              // console.warn('will clear cache', player);
-              (_animation as RLottiePlayer).clearCacheWhenSafe();
-            }/*  else if(animation instanceof HTMLVideoElement && animation.src) {
-              animation.dataset.src = animation.src;
-              animation.src = '';
-              animation.load();
-            } */
-          }
-
-          break;
         }
-      }
-    });
+      });
+    }
 
     this.visible = new Set();
 
@@ -166,7 +170,7 @@ export class AnimationIntersector {
       }
     }
 
-    this.observer.unobserve(el);
+    this.observer?.unobserve(el);
     this.visible.delete(player);
     this.byPlayer.delete(animation);
   }
@@ -215,7 +219,11 @@ export class AnimationIntersector {
     }
 
     (this.byGroups[group as AnimationItemGroup] ??= []).push(item);
-    this.observer.observe(item.el);
+    if(this.observer) {
+      this.observer.observe(item.el);
+    } else {
+      this.visible.add(item);
+    }
     this.byPlayer.set(animation, item);
   }
 
@@ -311,12 +319,16 @@ export class AnimationIntersector {
     }
 
     animations.forEach((animation) => {
-      this.observer.unobserve(animation.el);
+      this.observer?.unobserve(animation.el);
     });
 
     fastRaf(() => {
       animations.forEach((animation) => {
-        this.observer.observe(animation.el);
+        if(this.observer) {
+          this.observer.observe(animation.el);
+        } else {
+          this.visible.add(animation);
+        }
       });
     });
   }

@@ -98,7 +98,6 @@ import pickKeys from '@helpers/object/pickKeys';
 import namedPromises from '@helpers/namedPromises';
 import callbackifyAll from '@helpers/callbackifyAll';
 import {appSettings} from '@stores/appSettings';
-import wrapMessageActionTextNew from '@components/wrappers/messageActionTextNew';
 import {createBotforumTopicFromAction} from './utils/dialogs/createBotforumTopicFromAction';
 
 // console.trace('include');
@@ -115,6 +114,21 @@ const TOPIC_TITLE_MAX_LENGTH = 16;
 const TOPIC_TITLE_DEFAULT = 'New Chat';
 
 export const SUGGESTED_POST_MIN_THRESHOLD_SECONDS = 60; // avoid last minute suggests, or if the user was thinking a lot before clicking send
+
+async function getMessageActionTextForCopy(message: Message.messageService) {
+  try {
+    const {default: wrapMessageActionTextNew} = await import('@components/wrappers/messageActionTextNew');
+    return await wrapMessageActionTextNew({
+      message,
+      plain: true,
+      noLinks: true,
+      noTextFormat: true
+    });
+  } catch(err) {
+    console.error('getMessageActionTextForCopy error:', err);
+    return message.message || '';
+  }
+}
 
 export enum HistoryType {
   Chat,
@@ -3960,14 +3974,14 @@ export class AppMessagesManager extends AppManager {
       }
 
       if(originalMessage._ === 'messageService') {
+        const text = await getMessageActionTextForCopy(originalMessage);
+        if(!text) {
+          continue;
+        }
+
         await this.sendText({
           ...options,
-          text: await wrapMessageActionTextNew({
-            message: originalMessage,
-            plain: true,
-            noLinks: true,
-            noTextFormat: true
-          }),
+          text,
           clearDraft: undefined
         });
         continue;
@@ -3984,7 +3998,7 @@ export class AppMessagesManager extends AppManager {
         .filter((message) => message?.grouped_id === originalMessage.grouped_id);
 
         const groupedInputs = groupedMessages
-          .map((message) => ({message, inputMedia: makeMessageMediaInput(message.media, {preserveTtl: false})}))
+        .map((message) => ({message, inputMedia: makeMessageMediaInput(message.media, {preserveTtl: false})}))
         .filter((entry) => entry.inputMedia && (
           entry.inputMedia._ === 'inputMediaPhoto' ||
           entry.inputMedia._ === 'inputMediaDocument'

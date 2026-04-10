@@ -13,6 +13,8 @@ import DEBUG from '@config/debug';
 import pause from '@helpers/schedulers/pause';
 import EventListenerBase from '@helpers/eventListenerBase';
 
+const HAS_WINDOW = typeof window !== 'undefined';
+
 const eventListener = new EventListenerBase<{
   start: () => void,
   end: () => void
@@ -61,7 +63,9 @@ export function dispatchHeavyAnimationEvent(promise: Promise<any>, timeout?: num
   return heavyAnimationPromise;
 }
 
-(window as any).dispatchHeavyAnimationEvent = dispatchHeavyAnimationEvent;
+if(HAS_WINDOW) {
+  (window as typeof window & {dispatchHeavyAnimationEvent?: typeof dispatchHeavyAnimationEvent}).dispatchHeavyAnimationEvent = dispatchHeavyAnimationEvent;
+}
 
 function onHeavyAnimationEnd() {
   if(heavyAnimationPromise.isFulfilled) {

@@ -15,17 +15,41 @@ export class CustomProperties {
   private computedStyle: CSSStyleDeclaration;
   private nightComputedStyle: CSSStyleDeclaration;
   private nightElement: HTMLElement;
+  private listenersAttached: boolean;
 
   constructor() {
     this.cache = {};
+    this.listenersAttached = false;
+    this.ensureNightElement();
+  }
 
-    this.nightElement = document.createElement('div');
-    this.nightElement.className = 'night';
-    this.nightElement.style.display = 'none';
-    document.body.append(this.nightElement);
+  private ensureNightElement() {
+    if(typeof document === 'undefined' || typeof window === 'undefined') {
+      return false;
+    }
 
-    rootScope.addEventListener('theme_changed', this.resetCache);
-    mediaSizes.addEventListener('resize', this.resetCache);
+    if(!this.nightElement) {
+      this.nightElement = document.createElement('div');
+      this.nightElement.className = 'night';
+      this.nightElement.style.display = 'none';
+    }
+
+    const parent = document.body || document.documentElement;
+    if(!parent) {
+      return false;
+    }
+
+    if(this.nightElement.parentElement !== parent) {
+      parent.append(this.nightElement);
+    }
+
+    if(!this.listenersAttached) {
+      rootScope.addEventListener('theme_changed', this.resetCache);
+      mediaSizes.addEventListener('resize', this.resetCache);
+      this.listenersAttached = true;
+    }
+
+    return true;
   }
 
   protected resetCache = () => {
@@ -43,6 +67,10 @@ export class CustomProperties {
     const index = night ? 1 : 0;
     if(values?.[index]) {
       return values[index];
+    }
+
+    if(!this.ensureNightElement()) {
+      return this.setPropertyCache(name, '', night);
     }
 
     this.computedStyle ??= window.getComputedStyle(document.documentElement);

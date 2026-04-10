@@ -9,13 +9,15 @@ import IS_TOUCH_SUPPORTED from '@environment/touchSupport';
 import simulateEvent from '@helpers/dom/dispatchEvent';
 
 let lastMouseDownElement: HTMLElement;
-document.addEventListener('mousedown', (e) => {
-  lastMouseDownElement = e.target as HTMLElement;
-  // if((lastMouseDownElement as any)?.cancelMouseDown) {
-  if(lastMouseDownElement?.closest('[cancel-mouse-down]')) {
-    e.preventDefault();
-  }
-});
+if(typeof document !== 'undefined') {
+  document.addEventListener('mousedown', (e) => {
+    lastMouseDownElement = e.target as HTMLElement;
+    // if((lastMouseDownElement as any)?.cancelMouseDown) {
+    if(lastMouseDownElement?.closest('[cancel-mouse-down]')) {
+      e.preventDefault();
+    }
+  });
+}
 
 export function hasMouseMovedSinceDown(e: Event) {
   if(e.isTrusted && e.type === 'click' && e.target !== lastMouseDownElement) {
