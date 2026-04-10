@@ -258,14 +258,22 @@ export class RootScope extends EventListenerBase<BroadcastEventsListeners> {
   private connectionStatus: {[name: string]: ConnectionStatusChange};
   public settings: StateSettings;
   public managers: AppManagers;
-  public premium: boolean;
+  private _premium: boolean;
+
+  public get premium() {
+    return this._premium || !!this.settings?.proMode;
+  }
+
+  public set premium(value: boolean) {
+    this._premium = value;
+  }
 
   constructor() {
     super();
 
     this.myId = NULL_PEER_ID;
     this.connectionStatus = {};
-    this.premium = false;
+    this._premium = false;
 
     this.addEventListener('user_auth', ({id}) => {
       this.myId = id.toPeerId();
@@ -274,7 +282,13 @@ export class RootScope extends EventListenerBase<BroadcastEventsListeners> {
     this.addEventListener('premium_toggle_private', ({isNew, isPremium}) => {
       this.premium = isPremium;
       if(!isNew) { // * only on change
-        this.dispatchEventSingle('premium_toggle', isPremium);
+        this.dispatchEventSingle('premium_toggle', this.premium);
+      }
+    });
+
+    this.addEventListener('settings_updated', ({key}) => {
+      if(key === 'settings.proMode') {
+        this.dispatchEventSingle('premium_toggle', this.premium);
       }
     });
 

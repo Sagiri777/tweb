@@ -20,7 +20,7 @@ export function isUnlockedSelfDestructMedia(message: Message) {
   return !!(
     media &&
     (media as MessageMedia.messageMediaPhoto).ttl_seconds &&
-    appSettings.exportedSelfDestructMedia &&
+    appSettings.proMode &&
     hasExportedSelfDestructPayload(media)
   );
 }

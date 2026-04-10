@@ -15,7 +15,7 @@ export default function canSaveMessageMedia(
   message: Message.message | Message.messageService,
   noForwards?: boolean
 ) {
-  if(appSettings.exportedSelfDestructMedia) {
+  if(appSettings.proMode) {
     const media = (message as Message.message)?.media as MessageMedia;
     if(message?._ === 'message' && media) {
       return true;

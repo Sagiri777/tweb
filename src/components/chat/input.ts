@@ -17,6 +17,7 @@ import emoticonsDropdown, {EmoticonsDropdown} from '@components/emoticonsDropdow
 import PopupCreatePoll from '@components/popups/createPoll';
 import PopupForward from '@components/popups/forward';
 import PopupNewMedia, {getCurrentNewMediaPopup} from '@components/popups/newMedia';
+import showForwardSelfDestructPopup from '@components/popups/forwardSelfDestruct';
 import {toast, toastNew} from '@components/toast';
 import {MessageEntity, DraftMessage, WebPage, Message, UserFull, AttachMenuPeerType, BotMenuButton, MessageMedia, InputReplyTo, Chat as MTChat, User, ChatFull, Dialog, PhotoSize, Photo, Document} from '@layer';
 import StickersHelper from '@components/chat/stickersHelper';
@@ -3929,6 +3930,11 @@ export default class ChatInput {
     if(preparedPaymentResult === PAYMENT_REJECTED) return;
 
     sendingParams.confirmedPaymentResult = preparedPaymentResult;
+    const sendForwardsAsCopy = (this.forwardingSendAsCopy ?? appSettings.forwarding.sendAsCopy);
+    const forwardPreserveTtl = await this.getForwardPreserveTtlChoice(sendForwardsAsCopy);
+    if(forwardPreserveTtl === undefined) {
+      return;
+    }
 
     if(editMsgId) {
       const message = this.editMessage;
@@ -3990,12 +3996,13 @@ export default class ChatInput {
             continue;
           }
         }
-        this.managers.appMessagesManager[(this.forwardingSendAsCopy ?? appSettings.forwarding.sendAsCopy) ? 'copyMessages' : 'forwardMessages']({
+        this.managers.appMessagesManager[sendForwardsAsCopy ? 'copyMessages' : 'forwardMessages']({
           ...sendingParams,
           fromPeerId: fromPeerId.toPeerId(),
           mids,
           dropAuthor: this.forwardElements && this.forwardElements.hideSender.checkboxField.checked,
-          dropCaptions: this.isDroppingCaptions()
+          dropCaptions: this.isDroppingCaptions(),
+          preserveTtl: forwardPreserveTtl
         }).catch(async(err: ApiError) => {
           if(err.type === 'VOICE_MESSAGES_FORBIDDEN') {
             toastNew({
@@ -4313,6 +4320,20 @@ export default class ChatInput {
     }
 
     return result;
+  }
+
+  private async getForwardPreserveTtlChoice(sendAsCopy: boolean) {
+    if(!sendAsCopy || !this.forwarding) {
+      return true;
+    }
+
+    for(const fromPeerId in this.forwarding) {
+      if(await this.managers.appMessagesManager.hasSelfDestructMessages(fromPeerId.toPeerId(), this.forwarding[fromPeerId])) {
+        return showForwardSelfDestructPopup();
+      }
+    }
+
+    return true;
   }
 
   public async initMessageReply(replyTo: ReturnType<ChatInput['getReplyTo']>) {

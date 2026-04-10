@@ -1743,6 +1743,10 @@ export default class ChatBubbles {
     });
 
     this.listenerSetter.add(rootScope)('settings_updated', ({key}) => {
+      if(key === 'settings.proMode') {
+        this.refreshSponsoredMessagesForProMode();
+      }
+
       if(key === 'settings.emoji.big') {
         // const middleware = this.getMiddleware();
         const fullMids = this.getRenderedHistory('desc');
@@ -4296,7 +4300,11 @@ export default class ChatBubbles {
     this.getSponsoredMessagePromise = undefined;
     this.sponsoredMessagesLoaded = false;
     this.sponsoredMessagesMids = [];
+    this.sponsoredMessages = [];
     this.sponsoredMessagesAvailable = [];
+    this.sponsoredMessageEvery = 0;
+    this.messagesSinceLastSponsored = 0;
+    this.sponsoredAfterMids.clear();
 
     if(this.stickyIntersector) {
       this.stickyIntersector.disconnect();
@@ -9630,7 +9638,7 @@ export default class ChatBubbles {
         appendTo = this.container,
         method: 'append' | 'prepend' | 'replaceChildren' = 'append',
         elementsMethod: 'prepend' | 'replaceChildren' = 'prepend';
-      if(this.chat.isRestricted && !appSettings.exportedSelfDestructMedia) {
+      if(this.chat.isRestricted && !appSettings.proMode) {
         renderPromise = this.renderEmptyPlaceholder('restricted', bubble, message, elements);
       } else if(isSponsored) {
         bubble.classList.add('avoid-selection');
@@ -9938,6 +9946,39 @@ export default class ChatBubbles {
   private messagesSinceLastSponsored = 0;
   private sponsoredAfterMids = new Map<number, MyMessage>();
   private sponsoredMessagesLoaded = false;
+
+  private clearSponsoredMessages() {
+    const sponsoredMessagesMids = this.sponsoredMessagesMids.slice();
+
+    this.getSponsoredMessagePromise = undefined;
+    this.sponsoredMessagesLoaded = false;
+    this.sponsoredMessagesMids = [];
+    this.sponsoredMessages = [];
+    this.sponsoredMessagesAvailable = [];
+    this.sponsoredMessageEvery = 0;
+    this.messagesSinceLastSponsored = 0;
+    this.sponsoredAfterMids.clear();
+
+    if(sponsoredMessagesMids.length) {
+      this.deleteMessagesByIds(sponsoredMessagesMids, false, true);
+      this.deleteEmptyDateGroups();
+      this.scrollable.onScroll();
+    }
+  }
+
+  private refreshSponsoredMessagesForProMode() {
+    this.clearSponsoredMessages();
+
+    if(
+      appSettings.proMode ||
+      !this.chat.isBroadcast ||
+      this.chat.type !== ChatType.Chat
+    ) {
+      return;
+    }
+
+    this.loadSponsoredMessages();
+  }
 
   private async generateSponsoredMessage(sponsoredMessage: SponsoredMessage.sponsoredMessage, idx: number) {
     const offset = SPONSORED_MESSAGE_ID_OFFSET + idx

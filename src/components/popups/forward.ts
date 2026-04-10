@@ -16,6 +16,7 @@ import getDocumentInput from '@appManagers/utils/docs/getDocumentInput';
 import CheckboxField from '@components/checkboxField';
 import Row from '@components/row';
 import PopupElement from '.';
+import showForwardSelfDestructPopup from './forwardSelfDestruct';
 import {useAppConfig, useIsFrozen} from '@stores/appState';
 import {appSettings} from '@stores/appSettings';
 import {Message, MessageMedia} from '@layer';
@@ -42,6 +43,23 @@ export default class PopupForward extends PopupPickUser {
         }
 
         if(peerId === rootScope.myId) {
+          let preserveTtl = true;
+          if(this.sendAsCopy) {
+            const hasSelfDestructMessages = (await Promise.all(Object.keys(peerIdMids).map((fromPeerIdKey) => {
+              const fromPeerId = fromPeerIdKey.toPeerId();
+              return this.managers.appMessagesManager.hasSelfDestructMessages(fromPeerId, peerIdMids[fromPeerId]);
+            }))).some(Boolean);
+
+            if(hasSelfDestructMessages) {
+              const choice = await showForwardSelfDestructPopup();
+              if(choice === undefined) {
+                return;
+              }
+
+              preserveTtl = choice;
+            }
+          }
+
           let count = 0;
           for(const fromPeerId in peerIdMids) {
             const mids = peerIdMids[fromPeerId];
@@ -61,7 +79,8 @@ export default class PopupForward extends PopupPickUser {
             this.managers.appMessagesManager[this.sendAsCopy ? 'copyMessages' : 'forwardMessages']({
               peerId,
               fromPeerId: fromPeerId.toPeerId(),
-              mids
+              mids,
+              preserveTtl
             });
           }
 
@@ -185,7 +204,8 @@ export default class PopupForward extends PopupPickUser {
     const forceSendAsCopy = (await Promise.all(messages.map(async(message) => {
       return shouldResendForwardAsCopy(
         message as Message.message,
-        message ? await rootScope.managers.appPeersManager.noForwards(message.peerId) : false
+        message ? await rootScope.managers.appPeersManager.noForwards(message.peerId) : false,
+        appSettings.forwarding.sendAsCopy
       );
     }))).some(Boolean);
 

@@ -78,6 +78,7 @@ import getMainGroupedMessage from '@appManagers/utils/messages/getMainGroupedMes
 import getUnreadReactions from '@appManagers/utils/messages/getUnreadReactions';
 import isMentionUnread from '@appManagers/utils/messages/isMentionUnread';
 import canMessageHaveFactCheck from '@appManagers/utils/messages/canMessageHaveFactCheck';
+import {appSettings} from '@stores/appSettings';
 import hasVisibleMessageMedia, {isUnlockedSelfDestructMedia} from '@appManagers/utils/messages/hasVisibleMessageMedia';
 import commonStateStorage from '@lib/commonStateStorage';
 import PaidMessagesQueue from '@appManagers/utils/messages/paidMessagesQueue';
@@ -97,7 +98,6 @@ import isObject from '@helpers/object/isObject';
 import pickKeys from '@helpers/object/pickKeys';
 import namedPromises from '@helpers/namedPromises';
 import callbackifyAll from '@helpers/callbackifyAll';
-import {appSettings} from '@stores/appSettings';
 import {createBotforumTopicFromAction} from './utils/dialogs/createBotforumTopicFromAction';
 
 // console.trace('include');
@@ -126,7 +126,7 @@ async function getMessageActionTextForCopy(message: Message.messageService) {
     });
   } catch(err) {
     console.error('getMessageActionTextForCopy error:', err);
-    return message.message || '';
+    return '';
   }
 }
 
@@ -301,7 +301,8 @@ export type MessageForwardParams = MessageSendingParams & {
 } & Partial<{
   withMyScore: true,
   dropAuthor: boolean,
-  dropCaptions: boolean
+  dropCaptions: boolean,
+  preserveTtl: boolean
 }>;
 
 export type RequestHistoryOptions = {
@@ -3940,7 +3941,11 @@ export class AppMessagesManager extends AppManager {
     const {peerId, fromPeerId, mids} = options;
     const shouldCopy = mids.some((mid) => {
       const message = this.getMessageByPeer(fromPeerId, mid) as Message.message;
-      return shouldResendForwardAsCopy(message, message ? this.appPeersManager.noForwards(message.peerId) : false);
+      return shouldResendForwardAsCopy(
+        message,
+        message ? this.appPeersManager.noForwards(message.peerId) : false,
+        appSettings.forwarding.sendAsCopy
+      );
     });
 
     if(shouldCopy) {
@@ -3961,10 +3966,40 @@ export class AppMessagesManager extends AppManager {
     return Promise.all(promises).then(noop);
   }
 
+  public async hasSelfDestructMessages(fromPeerId: PeerId, mids: number[]) {
+    for(const mid of mids) {
+      const message = await this.getMessageByPeer(fromPeerId, mid) as Message.message;
+      const media = message?.media as MessageMedia;
+      if((media as MessageMedia.messageMediaPhoto)?.ttl_seconds) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private async getForwardPreserveTtlOption(options: MessageForwardParams) {
+    if(options.preserveTtl !== undefined) {
+      return options.preserveTtl;
+    }
+
+    if(!(await this.hasSelfDestructMessages(options.fromPeerId, options.mids))) {
+      return true;
+    }
+
+    const {default: showForwardSelfDestructPopup} = await import('@components/popups/forwardSelfDestruct');
+    return showForwardSelfDestructPopup();
+  }
+
   public async copyMessages(options: MessageForwardParams) {
     await this.checkSendOptions(options);
 
     const {fromPeerId, mids} = options;
+    const preserveTtl = await this.getForwardPreserveTtlOption(options);
+    if(preserveTtl === undefined) {
+      return;
+    }
+
     const sentGroupedIds = new Set<string | number>();
 
     for(const mid of mids) {
@@ -3998,7 +4033,7 @@ export class AppMessagesManager extends AppManager {
         .filter((message) => message?.grouped_id === originalMessage.grouped_id);
 
         const groupedInputs = groupedMessages
-        .map((message) => ({message, inputMedia: makeMessageMediaInput(message.media, {preserveTtl: false})}))
+        .map((message) => ({message, inputMedia: makeMessageMediaInput(message.media, {preserveTtl})}))
         .filter((entry) => entry.inputMedia && (
           entry.inputMedia._ === 'inputMediaPhoto' ||
           entry.inputMedia._ === 'inputMediaDocument'
@@ -4040,7 +4075,7 @@ export class AppMessagesManager extends AppManager {
         continue;
       }
 
-      const inputMedia = makeMessageMediaInput(media, {preserveTtl: false});
+      const inputMedia = makeMessageMediaInput(media, {preserveTtl});
       if(inputMedia) {
         await this.sendOther({
           ...options,
@@ -10485,6 +10520,12 @@ export class AppMessagesManager extends AppManager {
   }
 
   public async getSponsoredMessage(peerId: PeerId): Promise<MessagesSponsoredMessages> {
+    if(this.rootScope.premium || appSettings.proMode) {
+      return {
+        _: 'messages.sponsoredMessagesEmpty'
+      };
+    }
+
     // return Promise.resolve({
     //   '_': 'messages.sponsoredMessages',
     //   'posts_between': 5,

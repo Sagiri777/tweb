@@ -29,6 +29,8 @@ import createContextMenu from '@helpers/dom/createContextMenu';
 import {copyTextToClipboard} from '@helpers/clipboard';
 import {getSponsoredMessageButtons} from '@components/chat/contextMenu';
 import PopupReportAd from '@components/popups/reportAd';
+import rootScope from '@lib/rootScope';
+import {appSettings} from '@stores/appSettings';
 
 export default class ChatTopbarSponsored extends PinnedContainer {
   private dispose: () => void;
@@ -54,11 +56,13 @@ export default class ChatTopbarSponsored extends PinnedContainer {
 
     const [message, setMessage] = createSignal<SponsoredMessage>();
 
-    const middleware = getMiddleware()
-
-    createEffect(on(peerId, (peerId$) => {
+    const middleware = getMiddleware();
+    const clearMessage = () => {
       setMessage(undefined);
       this.toggle(true);
+    };
+    const loadMessage = (peerId$: PeerId) => {
+      clearMessage();
       if(peerId$ === NULL_PEER_ID || !peerId$.isUser()) return;
       if(!this.chat.isBot) return;
 
@@ -70,7 +74,24 @@ export default class ChatTopbarSponsored extends PinnedContainer {
           this.toggle(false);
         }
       });
-    }))
+    };
+
+    createEffect(on(peerId, (peerId$) => {
+      loadMessage(peerId$);
+    }));
+
+    this.listenerSetter.add(rootScope)('settings_updated', ({key}) => {
+      if(key !== 'settings.proMode') {
+        return;
+      }
+
+      if(appSettings.proMode) {
+        clearMessage();
+        return;
+      }
+
+      loadMessage(peerId());
+    });
 
     const photo = () => {
       const message$ = message();

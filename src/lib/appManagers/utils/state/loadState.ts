@@ -62,6 +62,19 @@ const RESET_WITH_BUILD: Array<keyof State> = [
   'build'
 ];
 
+function migrateLegacySettingsKeys(state: Partial<State>) {
+  const settings = state.settings as State['settings'] & {exportedSelfDestructMedia?: boolean};
+  if(!settings) {
+    return;
+  }
+
+  if(settings.proMode === undefined && settings.exportedSelfDestructMedia !== undefined) {
+    settings.proMode = settings.exportedSelfDestructMedia;
+  }
+
+  delete settings.exportedSelfDestructMedia;
+}
+
 // const REFRESH_KEYS_WEEK = ['dialogs', 'allDialogsLoaded', 'updates', 'pinnedOrders'] as any as Array<keyof State>;
 
 function AnyStateWriter<S>(log: ReturnType<typeof logger>, keys: string[], init: S) {
@@ -265,6 +278,8 @@ async function loadStateForAccount(accountNumber: ActiveAccountNumber): Promise<
     writer.state.authState = {_: 'authStateSignedIn'};
   }
 
+  migrateLegacySettingsKeys(writer.state);
+
   // await STATE_STEPS.STATE_ID(writer);
   if(accountNumber === 1) await STATE_STEPS.CHANGED_AUTH(writer);
   STATE_STEPS.REFRESH(writer);
@@ -326,6 +341,8 @@ async function loadOldState(): Promise<LoadStateResult> {
     // ! Warning ! DON'T delete this
     writer.state.authState = {_: 'authStateSignedIn'};
   }
+
+  migrateLegacySettingsKeys(writer.state);
 
   // await STATE_STEPS.STATE_ID(writer);
   await STATE_STEPS.CHANGED_AUTH(writer);

@@ -410,7 +410,7 @@ export default class AppMediaViewer extends AppMediaViewerBase<'caption', 'delet
       !appSettings.forwarding.sendAsCopy &&
       (isServiceMessage || noAuthor)
     );
-    const allowDownload = appSettings.exportedSelfDestructMedia && !!media;
+    const allowDownload = appSettings.proMode && !!media;
     const cantDownloadMessage = !allowDownload && (
       (isServiceMessage ? noForwards : cantForwardMessage && !isSponsored) ||
       !canSaveMessageMedia(message, noForwards)

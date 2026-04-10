@@ -891,7 +891,7 @@ export default class Chat extends EventListenerBase<{
   }
 
   public get isSensitive() {
-    if(appSettings.exportedSelfDestructMedia) {
+    if(appSettings.proMode) {
       return false;
     }
 
@@ -988,7 +988,7 @@ export default class Chat extends EventListenerBase<{
       });
     }
 
-    this.isRestricted = appSettings.exportedSelfDestructMedia ? false : isRestricted;
+    this.isRestricted = appSettings.proMode ? false : isRestricted;
 
     if(this.selection) {
       this.selection.isScheduled = type === ChatType.Scheduled;

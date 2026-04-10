@@ -168,13 +168,13 @@ export class AppPeersManager extends AppManager {
 
   public isPeerRestricted(peerId: PeerId) {
     return callbackify(this.appPrivacyManager.getContentSettings(), (settings) => {
-      if(appSettings.exportedSelfDestructMedia) {
+      if(appSettings.proMode) {
         ignoreRestrictionReasons(['all']);
       } else {
         ignoreRestrictionReasons([]);
       }
 
-      if(appSettings.exportedSelfDestructMedia) {
+      if(appSettings.proMode) {
         return false;
       }
 

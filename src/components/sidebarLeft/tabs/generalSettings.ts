@@ -159,20 +159,20 @@ export default class AppGeneralSettingsTab extends SliderSuperTabEventable {
         listenerSetter: this.listenerSetter
       });
 
-      const exportedSelfDestructMediaCheckboxField = new CheckboxField({
+      const proModeCheckboxField = new CheckboxField({
         toggle: true,
-        checked: appSettings.exportedSelfDestructMedia,
+        checked: appSettings.proMode,
         listenerSetter: this.listenerSetter
       });
 
-      this.listenerSetter.add(exportedSelfDestructMediaCheckboxField.input)('change', () => {
-        setAppSettings('exportedSelfDestructMedia', exportedSelfDestructMediaCheckboxField.checked);
+      this.listenerSetter.add(proModeCheckboxField.input)('change', () => {
+        setAppSettings('proMode', proModeCheckboxField.checked);
       });
 
-      const exportedSelfDestructMediaRow = new Row({
-        title: 'Preserve exported self-destruct media',
-        subtitle: 'Allow viewing and saving exported self-destruct files without syncing deletion.',
-        checkboxField: exportedSelfDestructMediaCheckboxField,
+      const proModeRow = new Row({
+        title: 'Pro Mode',
+        subtitle: 'Pro Mode',
+        checkboxField: proModeCheckboxField,
         havePadding: true,
         listenerSetter: this.listenerSetter
       });
@@ -204,7 +204,7 @@ export default class AppGeneralSettingsTab extends SliderSuperTabEventable {
         chatBackgroundButton,
         animationsRow.container,
         liteModeRow.container,
-        exportedSelfDestructMediaRow.container,
+        proModeRow.container,
         forwardAsCopyRow.container
       );
     }

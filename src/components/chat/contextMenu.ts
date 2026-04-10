@@ -1166,7 +1166,7 @@ export default class ChatContextMenu {
       return message.some((message) => ChatContextMenu.canDownload(message, withTarget, noForwards, container));
     }
 
-    if(appSettings.exportedSelfDestructMedia) {
+    if(appSettings.proMode) {
       const media = getMediaFromMessage(message as Message.message, true);
       if(!media) {
         return false;
@@ -1185,7 +1185,7 @@ export default class ChatContextMenu {
     }
 
     const media = getMediaFromMessage(message as Message.message, true);
-    if(appSettings.exportedSelfDestructMedia) {
+    if(appSettings.proMode) {
       if(!media) {
         return false;
       }
@@ -1200,7 +1200,7 @@ export default class ChatContextMenu {
       isGoodType = true;
     } else {
       if(!document) {
-        if(appSettings.exportedSelfDestructMedia) {
+        if(appSettings.proMode) {
           isGoodType = !!media;
         } else {
           return false;
@@ -1212,7 +1212,7 @@ export default class ChatContextMenu {
     }
 
     let hasTarget = !withTarget || !!IS_TOUCH_SUPPORTED;
-    if(appSettings.exportedSelfDestructMedia) {
+    if(appSettings.proMode) {
       hasTarget = true;
     }
 

@@ -3,7 +3,7 @@ import {setAppSettingsSilent} from '@stores/appSettings';
 
 describe('hasVisibleMessageMedia', () => {
   afterEach(() => {
-    setAppSettingsSilent('exportedSelfDestructMedia', false);
+    setAppSettingsSilent('proMode', false);
   });
 
   test('returns false for self-destructing media without payload', () => {
@@ -19,7 +19,7 @@ describe('hasVisibleMessageMedia', () => {
   });
 
   test('returns true for self-destructing media with exported document payload', () => {
-    setAppSettingsSilent('exportedSelfDestructMedia', true);
+    setAppSettingsSilent('proMode', true);
 
     expect(hasVisibleMessageMedia({
       _: 'message',

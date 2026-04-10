@@ -3,7 +3,7 @@ import {appSettings} from '@stores/appSettings';
 import {Message} from '@layer';
 
 export default function isMessageRestricted(message: Message.message) {
-  if(appSettings.exportedSelfDestructMedia) {
+  if(appSettings.proMode) {
     return false;
   }
 
@@ -11,7 +11,7 @@ export default function isMessageRestricted(message: Message.message) {
 }
 
 export function isMessageSensitive(message: Message) {
-  if(appSettings.exportedSelfDestructMedia) {
+  if(appSettings.proMode) {
     return false;
   }
 
