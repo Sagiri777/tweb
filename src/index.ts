@@ -57,6 +57,7 @@ import {MAX_SIDEBAR_WIDTH, MIN_SIDEBAR_WIDTH, SIDEBAR_COLLAPSE_FACTOR} from '@co
 import useHasFoldersSidebar, {useIsSidebarCollapsed} from '@stores/foldersSidebar';
 import appNavigationController from '@components/appNavigationController';
 import {preventCrossTabDynamicImportDeadlock} from '@helpers/preventDeadlock';
+import {initSharedLoginProvider} from '@lib/accountShareLogin';
 
 // import commonStateStorage from '@lib/commonStateStorage';
 // import { STATE_INIT } from '@config/state';
@@ -693,6 +694,7 @@ function setDocumentLangPackProperties(langPack: LangPackDifference.langPackDiff
     }, 500); */
   } else {
     console.log('Will mount IM page:', Date.now() / 1000);
+    initSharedLoginProvider();
 
     const fontsPromise = loadFonts();
     fadeInWhenFontsReady(document.getElementById('main-columns'), fontsPromise);
