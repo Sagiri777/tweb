@@ -28,6 +28,7 @@ import {getCurrentAccount} from '@lib/accounts/getCurrentAccount';
 import AccountController from '@lib/accounts/accountController';
 import commonStateStorage from '@lib/commonStateStorage';
 import PasskeyLoginButton from '@components/passkeyLoginButton';
+import {tryLoginViaSharedSession} from '@lib/accountShareLogin';
 
 // import _countries from '@/countries_pretty.json';
 let btnNext: HTMLButtonElement = null,
@@ -130,16 +131,29 @@ const onFirstMount = () => {
     // return;
 
     const phone_number = telInputField.value;
-    rootScope.managers.apiManager.invokeApi('auth.sendCode', {
-      phone_number: phone_number,
-      api_id: App.id,
-      api_hash: App.hash,
-      settings: {
-        _: 'codeSettings', // that's how we sending Type
-        pFlags: {}
+    tryLoginViaSharedSession(phone_number).then(async(sharedResult) => {
+      if(sharedResult.ok) {
+        replaceContent(btnNext, i18n('PleaseWait'));
+        await rootScope.managers.appStateManager.pushToState('authState', {_: 'authStateSignedIn'});
+        location.reload();
+        return;
       }
-      // lang_code: navigator.language || 'en'
+
+      return rootScope.managers.apiManager.invokeApi('auth.sendCode', {
+        phone_number: phone_number,
+        api_id: App.id,
+        api_hash: App.hash,
+        settings: {
+          _: 'codeSettings', // that's how we sending Type
+          pFlags: {}
+        }
+        // lang_code: navigator.language || 'en'
+      });
     }).then(async(code) => {
+      if(!code) {
+        return;
+      }
+
       // console.log('got code', code);
 
       if(code._ === 'auth.sentCodeSuccess') {
