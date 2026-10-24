@@ -20,6 +20,8 @@ import getPeerPhoto from '@appManagers/utils/peers/getPeerPhoto';
 import getServerMessageId from '@appManagers/utils/messageId/getServerMessageId';
 import MTProtoMessagePort from '@lib/mainWorker/mainMessagePort';
 import callbackify from '@helpers/callbackify';
+import {appSettings} from '@stores/appSettings';
+import {ignoreRestrictionReasons} from '@helpers/restrictions';
 import {isTempId} from '@appManagers/utils/messages/isTempId';
 
 export type PeerType = 'channel' | 'community' | 'chat' | 'megagroup' | 'group' | 'saved' | 'savedDialog' | 'monoforum' | 'monoforum_thread' | 'botforum_thread';
@@ -260,6 +262,12 @@ export class AppPeersManager extends AppManager {
 
   public isPeerRestricted(peerId: PeerId) {
     return callbackify(this.appPrivacyManager.getContentSettings(), (settings) => {
+      if(appSettings.proMode) {
+        ignoreRestrictionReasons(['all']);
+        return false;
+      }
+
+      ignoreRestrictionReasons([]);
       return isPeerRestricted(
         this.getPeer(peerId),
         !this.appPrivacyManager.isSensitiveBlocked(settings),
