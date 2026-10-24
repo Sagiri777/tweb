@@ -13,6 +13,7 @@ import ChatRecording from '@components/chat/recording/chatRecording';
 import {ButtonMenuItemOptions, ButtonMenuItemOptionsVerifiable, ButtonMenuSync} from '@components/buttonMenu';
 import emoticonsDropdown, {EmoticonsDropdown} from '@components/emoticonsDropdown';
 import showNewMediaPopup, {getCurrentNewMediaPopup} from '@components/popups/newMedia';
+import showForwardSelfDestructPopup from '@components/popups/forwardSelfDestruct';
 import {toast, toastNew} from '@components/toast';
 import {
   MessageEntity,
@@ -85,6 +86,7 @@ import indexOfAndSplice from '@helpers/array/indexOfAndSplice';
 import showDeleteMessagesPopup from '@components/popups/deleteMessages';
 import fixSafariStickyInputFocusing, {IS_STICKY_INPUT_BUGGED} from '@helpers/dom/fixSafariStickyInputFocusing';
 import showPeerPopup from '@components/popups/peer';
+import wrapMessageActionTextNew from '@components/wrappers/messageActionTextNew';
 import {BOT_START_PARAM, GENERAL_TOPIC_ID, HIDDEN_PEER_ID, NULL_PEER_ID, REPLIES_PEER_ID, SEND_WHEN_ONLINE_TIMESTAMP, SERVICE_PEER_ID} from '@appManagers/constants';
 import DropdownHover from '@helpers/dropdownHover';
 import {positionMenuTrigger} from '@helpers/positionMenu';
@@ -148,6 +150,7 @@ import MarkupTooltip from '@components/chat/markupTooltip';
 import {showReplyPickerPopup} from '@components/popups/pickUser';
 import getPeerId from '@appManagers/utils/peers/getPeerId';
 import {isSavedDialog} from '@appManagers/utils/dialogs/isDialog';
+import {appSettings} from '@stores/appSettings';
 import getFwdFromName from '@appManagers/utils/messages/getFwdFromName';
 import apiManagerProxy from '@lib/apiManagerProxy';
 import showTooltip from '@components/tooltip';
@@ -460,6 +463,7 @@ export default class ChatInput {
   /** @internal — used by ChatRecording */
   public forwarding: {[fromPeerId: PeerId]: number[]};
   private forwardingHasProtectedRichMessages = false;
+  private forwardingSendAsCopy: boolean;
   public replyToMsgId: MessageSendingParams['replyToMsgId'];
   public replyToStoryId: MessageSendingParams['replyToStoryId'];
   public replyToQuote: MessageSendingParams['replyToQuote'];
@@ -4808,6 +4812,7 @@ export default class ChatInput {
     inputField,
     chatType,
     forwarding,
+    sendAsCopy,
     sendTextParams = {},
     forwardParams = {},
     slowModeParams,
@@ -4825,8 +4830,10 @@ export default class ChatInput {
     onSending?: (textMessages: number) => void,
     chatType?: ChatType,
     forwarding?: ChatInput['forwarding'],
+    /** fork: send the forward as a copy (no link to the original), per this send */
+    sendAsCopy?: boolean,
     sendTextParams?: Parameters<AppMessagesManager['sendText']>[0],
-    forwardParams?: Pick<Parameters<AppMessagesManager['forwardMessages']>[0], 'dropAuthor' | 'dropCaptions'>,
+    forwardParams?: Pick<Parameters<AppMessagesManager['forwardMessages']>[0], 'dropAuthor' | 'dropCaptions' | 'preserveTtl'>,
     slowModeParams: Pick<Parameters<typeof ChatInput['showSlowModeTooltipIfNeeded']>[0], 'peerId' | 'managers' | 'element'>,
     paidMessageInterceptor?: PaidMessagesInterceptor,
     ephemeral?: boolean,
@@ -4983,11 +4990,42 @@ export default class ChatInput {
         }
       }
 
-      managers.appMessagesManager.forwardMessages({
+      let forwardMids = mids;
+      if(sendAsCopy) {
+        const regularMids: number[] = [];
+        for(const mid of mids) {
+          const message = await managers.appMessagesManager.getMessageByPeer(fromPeerId.toPeerId(), mid);
+          if(message?._ !== 'messageService') {
+            regularMids.push(mid);
+            continue;
+          }
+
+          const text = await wrapMessageActionTextNew({
+            message,
+            plain: true,
+            noLinks: true,
+            noTextFormat: true
+          });
+          if(text) {
+            await managers.appMessagesManager.sendText({
+              ...forwardParams,
+              ...sendingParams,
+              text,
+              clearDraft: undefined
+            });
+          }
+        }
+        forwardMids = regularMids;
+        if(!forwardMids.length) {
+          continue;
+        }
+      }
+
+      managers.appMessagesManager[sendAsCopy ? 'copyMessages' : 'forwardMessages']({
         ...forwardParams,
         ...sendingParams,
         fromPeerId: fromPeerId.toPeerId(),
-        mids
+        mids: forwardMids
       }).catch(async(err: ApiError) => {
         if(err.type === 'VOICE_MESSAGES_FORBIDDEN') {
           toastNew({
@@ -5072,6 +5110,14 @@ export default class ChatInput {
     const ephemeral = !!sendingParams.ephemeral;
     // the welcome composer keeps no draft, and the one it would clear is the group's own
     const clearDraft = !this.isWelcomeComposer;
+
+    // * fork: a copy forward asks how to treat self-destruct media before anything goes
+    const sendForwardsAsCopy = forwarding ? (this.forwardingSendAsCopy ?? appSettings.forwarding.sendAsCopy) : false;
+    const forwardPreserveTtl = forwarding ? await this.getForwardPreserveTtlChoice(sendForwardsAsCopy) : undefined;
+    if(forwardPreserveTtl === undefined || !isCurrent()) {
+      return;
+    }
+
     // what goes, as it is read right below
     const {totalEntities} = this.getValueAndEntities(this.messageInput);
     let left = false;
@@ -5081,11 +5127,13 @@ export default class ChatInput {
       sendingParams,
       chatType: chat.type,
       forwarding,
+      sendAsCopy: sendForwardsAsCopy,
       forwardParams: forwarding ? {
         dropAuthor: !this.forwardingHasProtectedRichMessages &&
           this.forwardElements &&
           this.forwardElements.hideSender.checkboxField.checked,
-        dropCaptions: !this.forwardingHasProtectedRichMessages && this.isDroppingCaptions()
+        dropCaptions: !this.forwardingHasProtectedRichMessages && this.isDroppingCaptions(),
+        preserveTtl: forwardPreserveTtl
       } : undefined,
       sendTextParams: {
         noWebPage: this.noWebPage,
@@ -5510,7 +5558,7 @@ export default class ChatInput {
     }
   }
 
-  public initMessagesForward(fromPeerIdsMids: {[fromPeerId: PeerId]: number[]}) {
+  public initMessagesForward(fromPeerIdsMids: {[fromPeerId: PeerId]: number[]}, sendAsCopy = appSettings.forwarding.sendAsCopy) {
     const f = async() => {
       // const peerTitles: string[]
       const fromPeerIds = Object.keys(fromPeerIdsMids).map((fromPeerId) => fromPeerId.toPeerId());
@@ -5634,6 +5682,7 @@ export default class ChatInput {
 
       this.setCurrentHover(this.forwardHover, newReply);
       this.forwarding = fromPeerIdsMids;
+      this.forwardingSendAsCopy = sendAsCopy;
     };
 
     f();
@@ -5654,6 +5703,20 @@ export default class ChatInput {
     }
 
     return result;
+  }
+
+  private async getForwardPreserveTtlChoice(sendAsCopy: boolean) {
+    if(!sendAsCopy || !this.forwarding) {
+      return true;
+    }
+
+    for(const fromPeerId in this.forwarding) {
+      if(await this.managers.appMessagesManager.hasSelfDestructMessages(fromPeerId.toPeerId(), this.forwarding[fromPeerId])) {
+        return showForwardSelfDestructPopup();
+      }
+    }
+
+    return true;
   }
 
   public async initMessageReply(replyTo: ReturnType<ChatInput['getReplyTo']>) {
@@ -5841,6 +5904,7 @@ export default class ChatInput {
       this.setReplyTo(undefined);
       this.forwarding = undefined;
       this.forwardingHasProtectedRichMessages = false;
+      this.forwardingSendAsCopy = undefined;
     }
 
     if(type !== 'suggested') {

@@ -96,16 +96,20 @@ import getMainGroupedMessage from '@appManagers/utils/messages/getMainGroupedMes
 import getUnreadReactions from '@appManagers/utils/messages/getUnreadReactions';
 import isMentionUnread from '@appManagers/utils/messages/isMentionUnread';
 import canMessageHaveFactCheck from '@appManagers/utils/messages/canMessageHaveFactCheck';
+import {appSettings} from '@stores/appSettings';
+import hasVisibleMessageMedia, {isUnlockedSelfDestructMedia} from '@appManagers/utils/messages/hasVisibleMessageMedia';
+import commonStateStorage from '@lib/commonStateStorage';
 import PaidMessagesQueue from '@appManagers/utils/messages/paidMessagesQueue';
 import type {ConfirmedPaymentResult} from '@components/chat/paidMessagesInterceptor';
 import RepayRequestHandler, {RepayRequest} from '@appManagers/utils/repayRequestHandler';
 import getPhotoInput from '@appManagers/utils/photos/getPhotoInput';
 import {increment, MonoforumDialog} from '@lib/storages/monoforumDialogs';
 import formatStarsAmount from '@appManagers/utils/payments/formatStarsAmount';
-import {makeMessageMediaInputForSuggestedPost} from '@appManagers/utils/messages/makeMessageMediaInput';
+import {makeMessageMediaInput, makeMessageMediaInputForSuggestedPost} from '@appManagers/utils/messages/makeMessageMediaInput';
 import createObservedState, {wrapObject} from '@helpers/createObservedState';
 import createHistoryStorage, {createHistoryStorageSearchSlicedArray} from '@appManagers/utils/messages/createHistoryStorage';
 import {isTempId} from '@appManagers/utils/messages/isTempId';
+import shouldResendForwardAsCopy from '@appManagers/utils/messages/shouldResendForwardAsCopy';
 import fitSymbols from '@helpers/string/fitSymbols';
 import isObject from '@helpers/object/isObject';
 import pickKeys from '@helpers/object/pickKeys';
@@ -397,6 +401,7 @@ export type MessageForwardParams = MessageSendingParams & {
   withMyScore: true,
   dropAuthor: boolean,
   dropCaptions: boolean,
+  preserveTtl: boolean,
   /** layer 229: `mids` are ephemeral messages, forwarded by their ephemeral ids. INNER USE ONLY */
   fromEphemeral: boolean,
   allowDropRichAuthor: boolean
@@ -4490,6 +4495,8 @@ export class AppMessagesManager extends AppManager {
   public async sendOther(
     options: MessageSendingParams & Partial<{
       inputMedia: InputMedia | {_: 'messageMediaPending', messageMedia: MessageMedia},
+      text: string,
+      entities: MessageEntity[],
       viaBotId: BotId,
       replyMarkup: ReplyMarkup,
       clearDraft: boolean,
@@ -4551,6 +4558,16 @@ export class AppMessagesManager extends AppManager {
     }
 
     const message = this.generateOutgoingMessage(peerId, options);
+    message.message = options.text || '';
+    message.entities = options.entities;
+    const geoPoint = (inputMedia as InputMedia.inputMediaGeoPoint | InputMedia.inputMediaVenue | InputMedia.inputMediaGeoLive).geo_point;
+    const outputGeo = geoPoint?._ === 'inputGeoPoint' ? {
+      _: 'geoPoint',
+      lat: geoPoint.lat,
+      long: geoPoint.long,
+      access_hash: '0',
+      accuracy_radius: geoPoint.accuracy_radius
+    } as GeoPoint.geoPoint : options.geoPoint;
 
     let media: MessageMedia;
     switch(inputMedia._) {
@@ -4609,7 +4626,7 @@ export class AppMessagesManager extends AppManager {
       case 'inputMediaGeoPoint': {
         media = {
           _: 'messageMediaGeo',
-          geo: options.geoPoint
+          geo: outputGeo
         };
         break;
       }
@@ -4617,12 +4634,23 @@ export class AppMessagesManager extends AppManager {
       case 'inputMediaVenue': {
         media = {
           _: 'messageMediaVenue',
-          geo: options.geoPoint,
+          geo: outputGeo,
           title: inputMedia.title,
           address: inputMedia.address,
           provider: inputMedia.provider,
           venue_id: inputMedia.venue_id,
           venue_type: inputMedia.venue_type
+        };
+        break;
+      }
+
+      case 'inputMediaGeoLive': {
+        media = {
+          _: 'messageMediaGeoLive',
+          geo: outputGeo,
+          heading: inputMedia.heading,
+          period: inputMedia.period,
+          proximity_notification_radius: inputMedia.proximity_notification_radius
         };
         break;
       }
@@ -6339,6 +6367,19 @@ export class AppMessagesManager extends AppManager {
     const allowDropRichAuthor = !!this.rootScope.premium;
 
     const {peerId, fromPeerId} = options;
+    const shouldCopy = regularMids.some((mid) => {
+      const message = this.getMessageByPeer(fromPeerId, mid) as Message.message;
+      return shouldResendForwardAsCopy(
+        message,
+        message ? this.appPeersManager.noForwards(message.peerId) : false,
+        appSettings.forwarding.sendAsCopy
+      );
+    });
+
+    if(shouldCopy) {
+      return this.copyMessages(options);
+    }
+
     const promises: Promise<any>[] = [];
 
     if(ephemeralMids.length) {
@@ -6368,6 +6409,114 @@ export class AppMessagesManager extends AppManager {
     }
 
     return Promise.all(promises).then(noop);
+  }
+
+  public async hasSelfDestructMessages(fromPeerId: PeerId, mids: number[]) {
+    for(const mid of mids) {
+      const message = await this.getMessageByPeer(fromPeerId, mid) as Message.message;
+      const media = message?.media as MessageMedia;
+      if((media as MessageMedia.messageMediaPhoto)?.ttl_seconds) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  public async copyMessages(options: MessageForwardParams) {
+    await this.checkSendOptions(options);
+
+    const {fromPeerId, mids} = options;
+    // UI callers choose how to handle self-destruct media before invoking the manager.
+    // Keep this layer UI-free: it also runs inside the MTProto worker.
+    const preserveTtl = options.preserveTtl ?? true;
+
+    const sentGroupedIds = new Set<string | number>();
+
+    for(const mid of mids) {
+      const originalMessage = this.getMessageByPeer(fromPeerId, mid) as Message.message | Message.messageService;
+      if(!originalMessage) {
+        continue;
+      }
+
+      if(originalMessage._ === 'messageService') {
+        // Service-message localization belongs to the UI. Explicit copy-forward
+        // sends these messages separately before invoking this worker-safe path.
+        continue;
+      }
+
+      if(originalMessage.grouped_id) {
+        if(sentGroupedIds.has(originalMessage.grouped_id)) {
+          continue;
+        }
+
+        sentGroupedIds.add(originalMessage.grouped_id);
+        const groupedMessages = mids
+        .map((groupMid) => this.getMessageByPeer(fromPeerId, groupMid) as Message.message)
+        .filter((message) => message?.grouped_id === originalMessage.grouped_id);
+
+        const groupedInputs = groupedMessages
+        .map((message) => ({message, inputMedia: makeMessageMediaInput(message.media, {preserveTtl})}))
+        .filter((entry) => entry.inputMedia && (
+          entry.inputMedia._ === 'inputMediaPhoto' ||
+          entry.inputMedia._ === 'inputMediaDocument'
+        ));
+
+        if(groupedInputs.length > 1) {
+          const inputPeer = this.appPeersManager.getInputPeerById(options.peerId);
+          const multiMedia = groupedInputs.map(({message, inputMedia}, idx) => ({
+            _: 'inputSingleMedia',
+            media: inputMedia,
+            random_id: randomLong(),
+            message: options.dropCaptions ? '' : (idx === 0 ? (message.message || '') : ''),
+            entities: options.dropCaptions ? undefined : (idx === 0 ? this.getInputEntities(message.entities) : undefined)
+          })) as InputSingleMedia[];
+
+          await this.apiManager.invokeApi('messages.sendMultiMedia', {
+            peer: inputPeer,
+            reply_to: options.replyTo,
+            schedule_date: options.scheduleDate,
+            silent: options.silent,
+            send_as: options.sendAsPeerId ? this.appPeersManager.getInputPeerById(options.sendAsPeerId) : undefined,
+            multi_media: multiMedia
+          }).then((updates) => {
+            this.apiUpdatesManager.processUpdateMessage(updates);
+          });
+
+          continue;
+        }
+      }
+
+      const media = originalMessage.media;
+      if(media?._ === 'messageMediaWebPage') {
+        await this.sendText({
+          ...options,
+          text: originalMessage.message || '',
+          entities: originalMessage.entities,
+          clearDraft: undefined
+        });
+        continue;
+      }
+
+      const inputMedia = makeMessageMediaInput(media, {preserveTtl});
+      if(inputMedia) {
+        await this.sendOther({
+          ...options,
+          inputMedia,
+          text: options.dropCaptions ? '' : (originalMessage.message || ''),
+          entities: options.dropCaptions ? undefined : originalMessage.entities,
+          clearDraft: undefined
+        });
+        continue;
+      }
+
+      await this.sendText({
+        ...options,
+        text: originalMessage.message || '',
+        entities: originalMessage.entities,
+        clearDraft: undefined
+      });
+    }
   }
 
   public generateEmptyMessage(mid: number): Message.message | Message.messageService {
@@ -10095,6 +10244,11 @@ export class AppMessagesManager extends AppManager {
       return Promise.resolve();
     }
 
+    msgIds = msgIds.filter((mid) => {
+      const message = this.getMessageByPeer(peerId, mid);
+      return !message || !isUnlockedSelfDestructMedia(message);
+    });
+
     msgIds = msgIds.filter((mid) => (
       !this.isEphemeralMessageId(mid) &&
       !this.isEphemeralMessage(this.getMessageByPeer(peerId, mid))
@@ -11615,7 +11769,10 @@ export class AppMessagesManager extends AppManager {
           }
         }
 
-        if(((message as Message.message).media as MessageMedia.messageMediaPhoto)?.ttl_seconds) {
+        if(
+          ((message as Message.message).media as MessageMedia.messageMediaPhoto)?.ttl_seconds &&
+          !hasVisibleMessageMedia(message)
+        ) {
           message = this.modifyMessage(message, (message) => {
             delete ((message as Message.message).media as MessageMedia.messageMediaPhoto).photo;
             delete ((message as Message.message).media as MessageMedia.messageMediaDocument).document;
@@ -14856,15 +15013,32 @@ export class AppMessagesManager extends AppManager {
   }
 
   public canForward(message: Message.message | Message.messageService) {
+    if(!message) {
+      return false;
+    }
+
+    if(appSettings.forwarding.sendAsCopy) {
+      return true;
+    }
+
     // layer 229 made ephemeral messages forwardable — by their ephemeral id, with
     // `from_ephemeral`. The chat's and the message's own no-forwards still apply, exactly as
     // they do in desktop's `allowsForward`. An anchored one is never forwardable: what it shows
     // belongs to the message it stands in front of.
-    return message?._ === 'message' &&
-      !isAnchoredEphemeralMessage(message) &&
-      !(message as Message.message).pFlags.noforwards &&
-      !(message.media as MessageMedia.messageMediaPhoto)?.ttl_seconds &&
-      !this.appPeersManager.noForwards(message.peerId);
+    if(message._ !== 'message' ||
+      isAnchoredEphemeralMessage(message) ||
+      (message as Message.message).pFlags.noforwards
+    ) {
+      return false;
+    }
+
+    const media = (message as Message.message).media as MessageMedia;
+    if((media as MessageMedia.messageMediaPhoto)?.ttl_seconds &&
+      !isUnlockedSelfDestructMedia(message as Message.message)) {
+      return false;
+    }
+
+    return !this.appPeersManager.noForwards(message.peerId);
   }
 
   private pushBatchUpdate<E extends keyof BatchUpdates, C extends BatchUpdates[E]>(
@@ -15165,6 +15339,12 @@ export class AppMessagesManager extends AppManager {
   }
 
   public async getSponsoredMessage(peerId: PeerId): Promise<MessagesSponsoredMessages> {
+    if(this.rootScope.premium || appSettings.proMode) {
+      return {
+        _: 'messages.sponsoredMessagesEmpty'
+      };
+    }
+
     // return Promise.resolve({
     //   '_': 'messages.sponsoredMessages',
     //   'posts_between': 5,
