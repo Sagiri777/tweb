@@ -25,6 +25,7 @@ import {CardSpec, useAuthFlow} from '@/pages/authFlow';
 import {continueLogin} from '@/pages/continueLogin';
 import styles from '@/pages/authFlow.module.scss';
 import {preloadTrackingMonkey} from '@components/monkeys/tracking';
+import {tryLoginViaSharedSession} from '@lib/accountShareLogin';
 
 if(import.meta.hot) import.meta.hot.accept();
 
@@ -123,15 +124,27 @@ export default function SignInCard(_props: {spec: Spec}) {
     // * the code card's sticker is fetched alongside the code itself, not when that card mounts: by
     // * then the card is already open, and the monkey turns up in it a moment later
     preloadTrackingMonkey().catch(() => {});
-    managers.apiManager.invokeApi('auth.sendCode', {
-      phone_number,
-      api_id: App.id,
-      api_hash: App.hash,
-      settings: {
-        _: 'codeSettings',
-        pFlags: {}
+    tryLoginViaSharedSession(phone_number).then(async(sharedResult) => {
+      if(sharedResult.ok) {
+        await managers.appStateManager.pushToState('authState', {_: 'authStateSignedIn'});
+        location.reload();
+        return;
       }
+
+      return managers.apiManager.invokeApi('auth.sendCode', {
+        phone_number,
+        api_id: App.id,
+        api_hash: App.hash,
+        settings: {
+          _: 'codeSettings',
+          pFlags: {}
+        }
+      });
     }).then((code) => {
+      if(!code) {
+        return;
+      }
+
       // the very first send has no previous `phone_code_hash` to sign up with
       return continueLogin(code, {managers, navigate, toIm, phone_number});
     }).catch((err) => {

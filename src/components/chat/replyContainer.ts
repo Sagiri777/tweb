@@ -18,6 +18,7 @@ import limitSymbols from '@helpers/string/limitSymbols';
 import wrapEmojiText from '@lib/richTextProcessor/wrapEmojiText';
 import wrapMediaSpoiler from '@components/wrappers/mediaSpoiler';
 import {isMessageSensitive} from '@appManagers/utils/messages/isMessageRestricted';
+import {isUnlockedSelfDestructMedia} from '@appManagers/utils/messages/hasVisibleMessageMedia';
 import compareUint8Arrays from '@helpers/bytes/compareUint8Arrays';
 import {getTodoItemReplyPreview} from '@components/wrappers/messagePreviewIcon';
 import {getRichMessagePreviewMedia} from '@components/wrappers/richMessagePreview';
@@ -71,7 +72,12 @@ export async function wrapReplyMedia({
   }
 
   let setMedia = false, isRound = false;
-  if(!messageMedia || !mediaEl || (messageMedia as MessageMedia.messageMediaPhoto).ttl_seconds) {
+  // * self-destruct (ttl) media stays hidden, unless the fork's Pro Mode keeps the payload visible
+  if(
+    !messageMedia ||
+    !mediaEl ||
+    ((messageMedia as MessageMedia.messageMediaPhoto).ttl_seconds && !(message && isUnlockedSelfDestructMedia(message)))
+  ) {
     return {setMedia, isRound};
   }
 

@@ -24,6 +24,9 @@ import apiManagerProxy from '@lib/apiManagerProxy';
 import appNavigationController from '@components/appNavigationController';
 import Modes from '@config/modes';
 
+const HAS_WINDOW = typeof window !== 'undefined';
+const HAS_NAVIGATOR = typeof navigator !== 'undefined';
+
 export type PushSubscriptionNotifyType = 'init' | 'subscribe' | 'unsubscribe';
 export type PushSubscriptionNotifyEvent = `push_${PushSubscriptionNotifyType}`;
 
@@ -41,7 +44,7 @@ export class WebPushApiManager extends EventListenerBase<{
   private localNotificationsAvailable = true;
   private settings: NotificationSettings & {baseUrl?: string} = {} as any;
   private isAliveTO: any;
-  private isFirefox = navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
+  private isFirefox = HAS_NAVIGATOR && navigator.userAgent.toLowerCase().indexOf('firefox') > -1;
   private userVisibleOnly = this.isFirefox ? false : true;
   private log = logger('PUSH-API');
 
@@ -51,6 +54,8 @@ export class WebPushApiManager extends EventListenerBase<{
     super(false);
 
     if(
+      !HAS_WINDOW ||
+      !HAS_NAVIGATOR ||
       !('PushManager' in window) ||
       !('Notification' in window) ||
       !('serviceWorker' in navigator) ||
