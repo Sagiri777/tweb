@@ -22,6 +22,7 @@ tmp
 
 # Throw files you don't need in this folder
 ignore
+/.logs
 
 # Playwright
 /test-results/
