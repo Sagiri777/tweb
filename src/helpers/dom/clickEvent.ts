@@ -19,14 +19,17 @@ const onGlobalMouseDown = (e: MouseEvent) => {
 // otherwise, while the client is popped out into a Document PiP window, mousedowns there never update
 // `lastMouseDownElement` and EVERY real (isTrusted) click in the pip is swallowed. Re-bind to the
 // active app window's document, following the client into / out of the pip.
-let mouseDownDocument: Document;
-const bindMouseDownTracker = (win: Window) => {
-  mouseDownDocument?.removeEventListener('mousedown', onGlobalMouseDown);
-  mouseDownDocument = win.document;
-  mouseDownDocument.addEventListener('mousedown', onGlobalMouseDown);
-};
-bindMouseDownTracker(getAppWindow());
-onAppWindowChange((win) => bindMouseDownTracker(win));
+// Guarded for worker realms (no `document` there).
+if(typeof document !== 'undefined') {
+  let mouseDownDocument: Document;
+  const bindMouseDownTracker = (win: Window) => {
+    mouseDownDocument?.removeEventListener('mousedown', onGlobalMouseDown);
+    mouseDownDocument = win.document;
+    mouseDownDocument.addEventListener('mousedown', onGlobalMouseDown);
+  };
+  bindMouseDownTracker(getAppWindow());
+  onAppWindowChange((win) => bindMouseDownTracker(win));
+}
 
 export function hasMouseMovedSinceDown(e: Event) {
   // Native controls activated from the keyboard dispatch a trusted click

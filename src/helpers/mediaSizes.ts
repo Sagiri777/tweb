@@ -4,6 +4,8 @@ import {makeMediaSize, MediaSize} from '@helpers/mediaSize';
 import {createStore} from 'solid-js/store';
 import {getAppWindow, onAppWindowChange} from '@helpers/appWindow';
 
+const HAS_WINDOW = typeof window !== 'undefined';
+
 type MediaTypeSizes = {
   regular: MediaSize,
   webpage: MediaSize,
@@ -112,6 +114,23 @@ class MediaSizes extends EventListenerBase<{
   constructor() {
     super();
 
+    this.activeScreen = ScreenSize.large;
+    this.isMobile = false;
+    this.isLessThanFloatingLeftSidebar = false;
+    this.isFloatingLeftSidebar = false;
+    this.active = this.sizes.desktop;
+
+    if(!HAS_WINDOW) {
+      setStore({
+        isMobile: this.isMobile,
+        isFloatingLeftSidebar: this.isFloatingLeftSidebar,
+        isLessThanFloatingLeftSidebar: this.isLessThanFloatingLeftSidebar,
+        active: this.active,
+        activeScreen: this.activeScreen
+      });
+      return;
+    }
+
     this.onWinResize = () => {
       if(this.rAF) this.win.cancelAnimationFrame(this.rAF);
       this.rAF = this.win.requestAnimationFrame(() => {
@@ -190,7 +209,7 @@ class MediaSizes extends EventListenerBase<{
 }
 
 const mediaSizes = new MediaSizes();
-MOUNT_CLASS_TO.mediaSizes = mediaSizes;
+MOUNT_CLASS_TO && (MOUNT_CLASS_TO.mediaSizes = mediaSizes);
 export default mediaSizes;
 
 export function useMediaSizes() {

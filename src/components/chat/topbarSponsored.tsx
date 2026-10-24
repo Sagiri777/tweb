@@ -1,4 +1,4 @@
-import {Accessor, createEffect, createSignal, on, Show} from 'solid-js';
+import {Accessor, createEffect, createSignal, on, onCleanup, Show} from 'solid-js';
 import Modes from '@config/modes';
 import {AppManagers} from '@lib/managers';
 import {NULL_PEER_ID} from '@appManagers/constants';
@@ -24,6 +24,8 @@ import {createTopbarPlate, TopbarPlateController} from '@components/chat/topbarP
 import I18n from '@lib/langPack';
 import A11yButton from '@components/a11yButton';
 import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
+import rootScope from '@lib/rootScope';
+import {appSettings} from '@stores/appSettings';
 
 export type ChatSponsoredPlate = TopbarPlateController & {
   setPeerId: (peerId: PeerId) => void
@@ -37,11 +39,16 @@ function SponsoredPlateBody(props: {
 }) {
   const [message, setMessage] = createSignal<SponsoredMessage>();
 
-  createEffect(on(props.peerId, (peerId$) => {
+  // * fork: Pro Mode hides sponsored content entirely
+  const clearMessage = () => {
     setMessage(undefined);
     props.setHidden(true);
+  };
+  const loadMessage = (peerId$: PeerId) => {
+    clearMessage();
     if(peerId$ === NULL_PEER_ID || !peerId$.isUser()) return;
     if(!props.chat.isBot) return;
+    if(appSettings.proMode) return;
 
     props.managers.appMessagesManager.getSponsoredMessage(peerId$)
     .then((m) => {
@@ -52,7 +59,26 @@ function SponsoredPlateBody(props: {
         props.setHidden(false);
       }
     });
+  };
+
+  createEffect(on(props.peerId, (peerId$) => {
+    loadMessage(peerId$);
   }));
+
+  const onSettingsUpdated = ({key}: {key: string}) => {
+    if(key !== 'settings.proMode') {
+      return;
+    }
+
+    if(appSettings.proMode) {
+      clearMessage();
+      return;
+    }
+
+    loadMessage(props.peerId());
+  };
+  rootScope.addEventListener('settings_updated', onSettingsUpdated);
+  onCleanup(() => rootScope.removeEventListener('settings_updated', onSettingsUpdated));
 
   const photo = () => {
     const m = message();
