@@ -39,7 +39,7 @@ import IS_INSTALL_PROMPT_SUPPORTED from '@environment/installPrompt';
 import cacheInstallPrompt from '@helpers/dom/installPrompt';
 import {fillLocalizedDates} from '@helpers/date';
 import {nextRandomUint} from '@helpers/random';
-import {createEffect} from 'solid-js';
+import {createEffect, createRoot} from 'solid-js';
 import {setHotReloadGuardLoader} from '@lib/solidjs/hotReloadGuardProvider';
 import {IS_OVERLAY_SCROLL_SUPPORTED, USE_CUSTOM_SCROLL, USE_NATIVE_SCROLL} from '@environment/overlayScrollSupport';
 import IMAGE_MIME_TYPES_SUPPORTED, {IMAGE_MIME_TYPES_SUPPORTED_PROMISE} from '@environment/imageMimeTypesSupport';
@@ -57,12 +57,14 @@ import listenForLinkPress from '@helpers/dom/linkPress';
 import PopupElement, {createPopup} from '@components/popups/indexTsx';
 import PasscodeLockScreenController from '@components/passcodeLock/passcodeLockScreenController'; PasscodeLockScreenController;
 import commonStateStorage from '@lib/commonStateStorage';
+import {installGlobalNetworkProxy} from '@lib/networkProxy';
 import {useAppSettings, setAppSettingsSilent} from '@stores/appSettings';
 import {isUserCollapsedLeft} from '@helpers/updateColumnWidths';
 import {useMediaSizes} from '@helpers/mediaSizes';
 import useHasFoldersSidebar, {useIsSidebarCollapsed} from '@stores/foldersSidebar';
 import appNavigationController from '@components/appNavigationController';
 import {preventCrossTabDynamicImportDeadlock} from '@helpers/preventDeadlock';
+import {initSharedLoginProvider} from '@lib/accountShareLogin';
 import appChatBackground from '@components/chat/bubbles/chatBackground';
 
 // import commonStateStorage from '@lib/commonStateStorage';
@@ -76,6 +78,7 @@ import appChatBackground from '@components/chat/bubbles/chatBackground';
 //   })();
 // }
 
+installGlobalNetworkProxy();
 
 IMAGE_MIME_TYPES_SUPPORTED_PROMISE.then((mimeTypes) => {
   mimeTypes.forEach((mimeType) => {
@@ -253,15 +256,17 @@ function setRootClasses() {
   if(USE_NATIVE_SCROLL) {
     add.push('native-scroll');
   } else {
-    createEffect(() => {
-      const root = document.documentElement;
-      if(IS_OVERLAY_SCROLL_SUPPORTED()) {
-        root.classList.add('overlay-scroll');
-        root.classList.remove('custom-scroll');
-      } else if(USE_CUSTOM_SCROLL()) {
-        root.classList.remove('overlay-scroll');
-        root.classList.add('custom-scroll');
-      }
+    createRoot(() => {
+      createEffect(() => {
+        const root = document.documentElement;
+        if(IS_OVERLAY_SCROLL_SUPPORTED()) {
+          root.classList.add('overlay-scroll');
+          root.classList.remove('custom-scroll');
+        } else if(USE_CUSTOM_SCROLL()) {
+          root.classList.remove('overlay-scroll');
+          root.classList.add('custom-scroll');
+        }
+      });
     });
   }
 
@@ -457,7 +462,10 @@ if(import.meta.env.DEV) {
 
   await PasscodeLockScreenController.waitForUnlock(async() => {
     const settings = await commonStateStorage.get('settings');
-    settings && setAppSettingsSilent(settings);
+    if(settings) {
+      setAppSettingsSilent(settings);
+      rootScope.settings = settings;
+    }
     themeController.setThemeListener();
 
     appChatBackground.attach();
@@ -514,6 +522,9 @@ if(import.meta.env.DEV) {
   const langPack = await I18n.getCacheLangPackAndApply();
   console.timeLog(TIME_LABEL, 'await I18n.getCacheLangPack()');
   const [appSettings] = useAppSettings();
+  createEffect(() => {
+    rootScope.settings = {...rootScope.settings, proMode: appSettings.proMode};
+  });
   I18n.setTimeFormat(appSettings.timeFormat);
   onLanguageApply();
   rootScope.addEventListener('language_apply', onLanguageApply);
@@ -643,6 +654,7 @@ if(import.meta.env.DEV) {
     mountAuthFlow(authState);
   } else {
     console.log('Will mount IM page:', Date.now() / 1000);
+    initSharedLoginProvider();
 
     const fontsPromise = loadFonts();
     fadeInWhenFontsReady(document.getElementById('main-columns'), fontsPromise);
