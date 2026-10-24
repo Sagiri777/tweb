@@ -8,8 +8,9 @@ import getServerMessageId from '@appManagers/utils/messageId/getServerMessageId'
 import {copyTextToClipboard} from '@helpers/clipboard';
 import {i18n, join} from '@lib/langPack';
 import {useAppConfig, useIsFrozen} from '@stores/appState';
+import {appSettings} from '@stores/appSettings';
 import {Message, User} from '@layer';
-import {createMemo, createRoot, Show} from 'solid-js';
+import {createMemo, createRoot, createSignal, Show} from 'solid-js';
 import {createStore} from 'solid-js/store';
 import Animated from '@helpers/solid/animations';
 import classNames from '@helpers/string/classNames';
@@ -25,6 +26,10 @@ import {getMiddleware} from '@helpers/middleware';
 import {SEND_WHEN_ONLINE_TIMESTAMP} from '@appManagers/constants';
 import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
+import shouldResendForwardAsCopy from '@appManagers/utils/messages/shouldResendForwardAsCopy';
+import RowTsx from '@components/rowTsx';
+import CheckboxFieldTsx from '@components/checkboxFieldTsx';
+import showForwardSelfDestructPopup from '@components/popups/forwardSelfDestruct';
 
 async function resolveChatRightsActions(peerIdMids: {[fromPeerId: PeerId]: number[]}): Promise<ChatRights[]> {
   const messagesPromises = Object.keys(peerIdMids).map((peerId) => {
@@ -91,6 +96,26 @@ async function resolveChatRightsActions(peerIdMids: {[fromPeerId: PeerId]: numbe
   return Array.from(actions);
 }
 
+async function resolveForceSendAsCopy(peerIdMids: {[fromPeerId: PeerId]: number[]}): Promise<boolean> {
+  const messagesPromises = Object.keys(peerIdMids).map((peerId) => {
+    const mids = peerIdMids[peerId as any as number];
+    return mids.map((mid) => {
+      return rootScope.managers.appMessagesManager.getMessageByPeer(peerId.toPeerId(), mid);
+    });
+  });
+
+  const messages = await Promise.all(flatten(messagesPromises));
+  const results = await Promise.all(messages.map(async(message) => {
+    return shouldResendForwardAsCopy(
+      message as Message.message,
+      message ? await rootScope.managers.appPeersManager.noForwards(message.peerId) : false,
+      appSettings.forwarding.sendAsCopy
+    );
+  }));
+
+  return results.some(Boolean);
+}
+
 export default async function showForwardPopup(
   peerIdMids?: {[fromPeerId: PeerId]: number[]},
   _onSelect?: (peerId: PeerId, threadId?: number) => Promise<void> | void,
@@ -118,6 +143,10 @@ export default async function showForwardPopup(
   }
 
   const {message_length_max: MAX_MESSAGE_LENGTH} = await managers.apiManager.getConfig();
+
+  // fork: "forward without source" — forced when the selection can't go through Telegram forwarding
+  const forceSendAsCopy = peerIdMids ? await resolveForceSendAsCopy(peerIdMids) : false;
+  const [sendAsCopy, setSendAsCopy] = createSignal(forceSendAsCopy || appSettings.forwarding.sendAsCopy);
 
   const listenerSetter = new ListenerSetter();
   const sendMenuMiddleware = getMiddleware();
@@ -184,6 +213,23 @@ export default async function showForwardPopup(
     handle.hide();
   };
 
+  let forwardPreserveTtlPromise: Promise<boolean | undefined> | undefined;
+  const getForwardPreserveTtlChoice = () => {
+    if(!sendAsCopy()) {
+      return Promise.resolve(true);
+    }
+
+    return forwardPreserveTtlPromise ??= (async() => {
+      for(const fromPeerId in peerIdMids) {
+        if(await managers.appMessagesManager.hasSelfDestructMessages(fromPeerId.toPeerId(), peerIdMids[fromPeerId])) {
+          return showForwardSelfDestructPopup();
+        }
+      }
+
+      return true;
+    })();
+  };
+
   const processSingle = async({
     peerId,
     threadId,
@@ -203,8 +249,13 @@ export default async function showForwardPopup(
     let success: boolean;
     if(openChat) {
       await hotReloadGuard.appImManager.setInnerPeer({peerId, threadId, monoforumThreadId});
-      hotReloadGuard.appImManager.chat.input.initMessagesForward(peerIdMids);
+      hotReloadGuard.appImManager.chat.input.initMessagesForward(peerIdMids, sendAsCopy());
     } else {
+      const preserveTtl = await getForwardPreserveTtlChoice();
+      if(preserveTtl === undefined) {
+        return false;
+      }
+
       const result = await ChatInput.sendMessageWithForward({
         inputField,
         sendingParams: {
@@ -214,6 +265,8 @@ export default async function showForwardPopup(
           scheduleDate: scheduleDate || undefined,
           scheduleRepeatPeriod: scheduleRepeatPeriod || undefined
         },
+        sendAsCopy: sendAsCopy(),
+        forwardParams: {preserveTtl},
         forwarding: peerIdMids,
         slowModeParams: {
           peerId,
@@ -384,7 +437,26 @@ export default async function showForwardPopup(
       const showCopyLink = () => canCopyLink && multiSelect() === 'hidden' && !hasMessage();
       const isFooterHidden = () => !canCopyLink && multiSelect() === 'hidden' && !hasMessage();
       return (
-        <div class={classNames('popup-forward-footer-content', isFooterHidden() && 'is-hidden')}>
+        <>
+          <Show when={!!peerIdMids}>
+            <RowTsx>
+              <RowTsx.CheckboxFieldToggle>
+                <CheckboxFieldTsx
+                  signal={[sendAsCopy, setSendAsCopy]}
+                  toggle
+                  disabled={forceSendAsCopy}
+                  listenerSetter={listenerSetter}
+                />
+              </RowTsx.CheckboxFieldToggle>
+              <RowTsx.Title>Forward without source</RowTsx.Title>
+              <RowTsx.Subtitle>
+                {forceSendAsCopy ?
+                  'This selection must be resent as a new message from you.' :
+                  'Temporarily resend this forward as a new message from you.'}
+              </RowTsx.Subtitle>
+            </RowTsx>
+          </Show>
+          <div class={classNames('popup-forward-footer-content', isFooterHidden() && 'is-hidden')}>
           <Animated type="cross-fade" itemClass="popup-forward-footer-item">
             <Show
               when={showCopyLink()}
@@ -413,7 +485,8 @@ export default async function showForwardPopup(
               </PopupElement.FooterButton>
             </Show>
           </Animated>
-        </div>
+          </div>
+        </>
       );
     },
     onClose: () => {
