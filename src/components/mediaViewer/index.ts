@@ -41,6 +41,7 @@ import apiManagerProxy from '@lib/apiManagerProxy';
 import {batch, createSignal} from 'solid-js';
 import {render} from 'solid-js/web';
 import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
+import {appSettings} from '@stores/appSettings';
 
 const isItemIndex = (index: number) => typeof(index) === 'number' && index >= 0;
 
@@ -742,8 +743,12 @@ export default class AppMediaViewer extends AppMediaViewerBase<'caption', 'delet
 
     void permissionsPromise.then(([noForwards, canForward, canDelete, canEdit]) => {
       if(this.target?.message !== message) return;
-      const cantForward = !canForward;
-      const cantDownload = (isServiceMessage ? noForwards : cantForward && !isSponsored) || !canSaveMessageMedia(message, noForwards);
+      const cantForward = !canForward && !appSettings.forwarding.sendAsCopy;
+      const allowDownload = appSettings.proMode && !!media;
+      const cantDownload = !allowDownload && (
+        (isServiceMessage ? noForwards : cantForward && !isSponsored) ||
+        !canSaveMessageMedia(message, noForwards)
+      );
       const cantCopy = cantDownload || !canCopyMediaToClipboard(media);
       const cantDelete = !canDelete;
       this.deleteAsChatPhoto = isChatPhotoEdit && !cantDelete;
