@@ -8,12 +8,14 @@ import classNames from '@helpers/string/classNames'
 import clamp from '@helpers/number/clamp'
 import styles from '@components/limitLineTsx.module.scss';
 import RangeSelector from '@components/rangeSelector'
-import I18n from '@lib/langPack'
+import I18n, {LangPackKey} from '@lib/langPack'
 import {lerp} from '@helpers/lerp'
 
 
 export function LimitLineTsx(props: {
   class?: string
+  ariaLabel?: LangPackKey
+  ariaValueText?: string
   progress: number
   reverse?: boolean
   animateProgress?: boolean
@@ -36,7 +38,14 @@ export function LimitLineTsx(props: {
   let tailContainerRef!: HTMLDivElement;
 
   const isSlider = props.onScrub !== undefined
-  const isReverse = () => props.reverse ?? I18n.getIsRTL()
+  // * `reverse` fills against the reading direction; the layout itself follows the line (the parts'
+  // * row and the mask in CSS), while the hint is placed in screen pixels: from the right when the
+  // * fill runs right to left
+  const isReverse = () => props.reverse ?? false
+  const isFilledFromRight = () => isReverse() !== I18n.getIsRTL()
+
+  // * the hint stands in screen pixels: a direction switched on the fly moves it to the other side
+  createEffect(on(I18n.isRTL, () => updateHintPosition(), {defer: true}))
 
   onMount(() => {
     const resizeObserver = new ResizeObserver(updateHintPosition);
@@ -49,7 +58,9 @@ export function LimitLineTsx(props: {
 
   function updateHintPosition() {
     const hintWidth = hintRef.clientWidth; // ! not bounding rect so transform is not applied
-    const parentWidth = hintRef.parentElement.getBoundingClientRect().width;
+    // * nor here: a popup scaling in would shrink the line, and right to left, where the tip is
+    // * counted from the right edge, set the hint tens of pixels off for good
+    const parentWidth = hintRef.parentElement.offsetWidth;
 
     const progress$ = progress()
     let sliderTipPosition = progress$ * parentWidth
@@ -57,7 +68,7 @@ export function LimitLineTsx(props: {
       // adjust for slider thumb (30 - thumb width + padding)
       sliderTipPosition += 30 * (1 - progress$) - 15;
     }
-    if(isReverse()) {
+    if(isFilledFromRight()) {
       sliderTipPosition = parentWidth - sliderTipPosition;
     }
 
@@ -123,6 +134,7 @@ export function LimitLineTsx(props: {
   if(isSlider) {
     range = new RangeSelector({
       step: 0.0001,
+      ariaLabel: props.ariaLabel,
       min: 0,
       max: 1,
       useProperty: true,
@@ -133,6 +145,7 @@ export function LimitLineTsx(props: {
       onScrub: props.onScrub
     });
     range.container.classList.add(styles.line, styles.slider);
+    createEffect(() => range.setValueText(props.ariaValueText));
     line = range.container;
 
     if(props.filledProgressElement) {
@@ -158,7 +171,7 @@ export function LimitLineTsx(props: {
   }
 
   createEffect(on(() => props.progress, (val, prev) => {
-    if(prev !== undefined && liteMode.isAvailable('animations') && !isSlider && props.animateProgress !== false) {
+    if(prev !== undefined && liteMode.isAvailable('motion') && !isSlider && props.animateProgress !== false) {
       const duration = 200;
       const startTime = performance.now();
       const diff = val - prev;

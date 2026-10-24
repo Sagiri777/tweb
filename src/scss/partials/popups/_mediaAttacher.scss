@@ -41,24 +41,9 @@
   .scrollable {
     position: relative;
   }
-
-  .btn-menu-overlay {
-    z-index: 3;
-  }
-
-  .menu-send {
-    z-index: 4;
-    top: calc(100% + .25rem);
-  }
 }
 
 .popup-new-media.popup-send-photo {
-  .menu-send {
-    top: unset;
-    bottom: 4.5rem;
-    right: var(--section-padding-inline);
-  }
-
   .popup-body {
     position: relative;
   }
@@ -69,7 +54,7 @@
 
   .checkbox-field {
     margin-bottom: 0;
-    margin-left: 0;
+    margin-inline-start: 0;
   }
 
   .popup-item-album {
@@ -113,7 +98,7 @@
     --height: calc(var(--messages-time-text-size) + .375rem);
     position: absolute;
     top: .75rem;
-    left: .75rem;
+    inset-inline-start: .75rem;
     border-radius: var(--height);
     background-color: var(--message-time-background);
     padding: 0px 6px;
@@ -140,8 +125,7 @@
     border-radius: 0;
   }
 
-  .document,
-  .audio {
+  .document {
     --icon-margin: .5rem;
     --icon-size: 3rem;
     --padding: .25rem;
@@ -202,16 +186,6 @@
     &-size {
       color: var(--input-placeholder-color);
       margin-top: .125rem;
-    }
-  }
-
-  .btn-menu-reactions {
-    &-container {
-      --bubble-side-offset: 0;
-    }
-
-    &-bubble {
-      display: none;
     }
   }
 
@@ -294,9 +268,26 @@
 
   transition: .2s;
 
+  // a11y: the actions are native buttons with the layer on
+  :where(.a11y) & {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: inherit;
+  }
+
   &:hover {
     color: #ffffff;
   }
+}
+
+:where(.a11y) .popup-item-media-more {
+  position: absolute;
+  top: .25rem;
+  inset-inline-end: .25rem;
+  z-index: 3;
+  color: #fff;
+  background-color: rgba(0, 0, 0, .5);
 }
 
 .spoiler-toggle {

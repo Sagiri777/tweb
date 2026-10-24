@@ -1,10 +1,12 @@
 import {copyTextToClipboard} from '@helpers/clipboard';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
+import {setDirection} from '@helpers/dom/setInnerHTML';
 import ListenerSetter from '@helpers/listenerSetter';
 import wrapPlainText from '@lib/richTextProcessor/wrapPlainText';
 import Button from '@components/button';
 import ButtonIcon from '@components/buttonIcon';
 import ButtonMenuToggle from '@components/buttonMenuToggle';
+import {MiddleEllipsisElement} from '@components/middleEllipsis';
 import shareUrlToPeers from '@components/popups/shareUrl';
 import ripple from '@components/ripple';
 import {toastNew} from '@components/toast';
@@ -25,20 +27,28 @@ export class InviteLink {
     listenerSetter,
     url,
     noRightButton,
-    onClick
+    onClick,
+    class: className
   }: {
     buttons?: Parameters<typeof ButtonMenuToggle>[0]['buttons'],
-    button?: HTMLButtonElement | false,
+    /**
+     * The action under the link. An array puts them side by side in one row —
+     * the Call Link box needs Share and Copy together.
+     */
+    button?: HTMLButtonElement | HTMLButtonElement[] | false,
     onButtonClick?: () => void,
     listenerSetter: ListenerSetter,
     url?: string,
     noRightButton?: boolean,
-    onClick?: () => void
+    onClick?: () => void,
+    /** Extra class on the container, for a caller that places it itself. */
+    class?: string
   }) {
     this.onButtonClick = onButtonClick;
 
     const linkContainer = this.container = document.createElement('div');
     linkContainer.classList.add('invite-link-container');
+    if(className) linkContainer.classList.add(...className.split(' ').filter(Boolean));
 
     const link = document.createElement('div');
     link.classList.add('invite-link', 'rp-overflow');
@@ -51,11 +61,11 @@ export class InviteLink {
       rightButton = ButtonMenuToggle({
         buttons,
         direction: 'bottom-left',
-        buttonOptions: {noRipple: true},
+        buttonOptions: {noRipple: true, ariaLabel: 'MultiAccount.More'},
         listenerSetter
       });
     } else if(!noRightButton) {
-      rightButton = ButtonIcon('copy', {noRipple: true});
+      rightButton = ButtonIcon('copy', {noRipple: true, ariaLabel: 'CopyLink'});
       attachClickEvent(rightButton, () => this.copyLink(), {listenerSetter});
     }
 
@@ -70,9 +80,19 @@ export class InviteLink {
       }, {listenerSetter});
     }
 
-    if(button) {
-      this.button = button;
-      button.className = 'btn-primary btn-color-primary invite-link-button';
+    const buttonElements = button ? (Array.isArray(button) ? button : [button]) : [];
+    buttonElements.forEach((element) => {
+      element.className = 'btn-primary btn-color-primary invite-link-button';
+    });
+    this.button = buttonElements[0];
+
+    let buttonsElement: HTMLElement;
+    if(buttonElements.length > 1) {
+      buttonsElement = document.createElement('div');
+      buttonsElement.classList.add('invite-link-buttons');
+      buttonsElement.append(...buttonElements);
+    } else {
+      buttonsElement = buttonElements[0];
     }
 
     if(url) this.setUrl(url);
@@ -82,7 +102,7 @@ export class InviteLink {
       rightButton
     ].filter(Boolean));
 
-    linkContainer.append(link, button || '');
+    linkContainer.append(link, buttonsElement || '');
 
     attachClickEvent(link, onClick || (() => this.copyLink()), {listenerSetter});
   }
@@ -92,7 +112,16 @@ export class InviteLink {
     if(s.includes('//')) {
       s = url.split('//').slice(1).join('//');
     }
-    this.textElement.replaceChildren(wrapPlainText(s));
+
+    // Middle truncation, so both ends of the link survive a narrow box: the
+    // same element documents and audio trim their file names with.
+    const element = MiddleEllipsisElement.create();
+    // * a link reads left to right by its own letters (a trailing `_` of the hash stays at its end),
+    // * yet sits at the start of the box in RTL
+    setDirection(element);
+    element.textContent = wrapPlainText(s);
+
+    this.textElement.replaceChildren(element);
     this.url = url;
   }
 

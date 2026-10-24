@@ -3,8 +3,10 @@ import {IS_OVERLAY_SCROLL_SUPPORTED} from '@environment/overlayScrollSupport';
 import IS_TOUCH_SUPPORTED from '@environment/touchSupport';
 import {IS_MOBILE_SAFARI, IS_SAFARI} from '@environment/userAgent';
 import cancelEvent from '@helpers/dom/cancelEvent';
+import isDocumentRTL from '@helpers/dom/isDocumentRTL';
 import classNames from '@helpers/string/classNames';
 import useHeavyAnimationCheck from '@hooks/useHeavyAnimationCheck';
+import Modes from '@config/modes';
 
 const SCROLL_THROTTLE = /* IS_ANDROID ? 200 :  */24;
 
@@ -32,7 +34,9 @@ export type ScrollableContextValue = {
   container: HTMLDivElement,
   onSizeChange: () => void,
   setScrollPositionSilently: (value: number) => void,
-  checkForTriggers: () => void
+  checkForTriggers: () => void,
+  isScrolledToStart: boolean,
+  isScrolledToEnd: boolean
 };
 
 export const ScrollableContext = createContext<ScrollableContextValue>();
@@ -43,10 +47,17 @@ export default function Scrollable(props: {
   thumbRef?: (el: HTMLDivElement) => void,
   contextRef?: (ctx: ScrollableContextValue) => void,
   class?: string,
+  tabIndex?: number,
   classList?: JSX.HTMLAttributes<HTMLDivElement>['classList'],
   style?: JSX.CSSProperties,
   axis?: 'x' | 'y',
   withBorders?: 'both' | 'top' | 'bottom' | 'manual',
+  /**
+   * Keep `isScrolledToStart` / `isScrolledToEnd` up to date without drawing the borders.
+   * `withBorders` implies it; this is for a consumer that only reads the state off the context
+   * (a floating popup header, say) and doesn't want a border on the scrollable itself.
+   */
+  trackEnds?: boolean,
   onScrolledTop?: () => void,
   onScrolledBottom?: () => void,
   onScroll?: () => void,
@@ -62,8 +73,12 @@ export default function Scrollable(props: {
   const clientAxis: 'clientY' | 'clientX' = axis === 'x' ? 'clientX' : 'clientY';
 
   const [ignoreScrollEvent, setIgnoreScrollEvent] = createSignal(false);
-  const scrollPosition = () => ref[scrollPositionProperty];
-  const setScrollPosition = (value: number) => ref[scrollPositionProperty] = value;
+  // * along x, from the inline start: a right-to-left row's `scrollLeft` runs from 0 down to minus the overflow
+  const scrollPosition = () => axis === 'x' ? Math.abs(ref.scrollLeft) : ref.scrollTop;
+  const setScrollPosition = (value: number) => {
+    if(axis === 'x') ref.scrollLeft = isDocumentRTL() ? -value : value;
+    else ref.scrollTop = value;
+  };
   const scrollSize = () => ref[scrollSizeProperty];
   const clientSize = () => ref[clientSizeProperty];
   const offsetSize = () => ref[offsetSizeProperty];
@@ -216,7 +231,10 @@ export default function Scrollable(props: {
     }, {capture: true, passive: false, once: true});
   };
 
-  const onScrollCallbacks = createMemo(() => [props.onScroll, props.withBorders && checkEnds].filter(Boolean));
+  const onScrollCallbacks = createMemo(() => [
+    props.onScroll,
+    (props.withBorders || props.trackEnds) && checkEnds
+  ].filter(Boolean));
 
   const onThumbMouseMove = (e: MouseEvent) => {
     cancelEvent(e);
@@ -255,16 +273,36 @@ export default function Scrollable(props: {
     e.stopPropagation();
     const container = ref;
     if(!e.deltaX && container.scrollWidth > container.clientWidth) {
-      container.scrollLeft += e.deltaY / 4;
+      // * scrolling down moves along the line, to the left in RTL
+      container.scrollLeft += e.deltaY / 4 * (isDocumentRTL() ? -1 : 1);
       cancelEvent(e);
     }
   };
 
+  const tracksEnds = () => !!(props.withBorders || props.trackEnds);
+
+  // which end the content sits at costs a layout read, so it is kept only where it is drawn
+  const checkEndsIfTracked = () => {
+    if(tracksEnds()) {
+      checkEnds();
+    }
+  };
+
   const onSizeChange = () => {
+    checkEndsIfTracked();
+
     if(!IS_OVERLAY_SCROLL_SUPPORTED() && thumbRef) {
       onScroll();
     }
   };
+
+  /**
+   * Which end the content sits at cannot be known before it is laid out — and whether it
+   * matters at all can turn true after mount, since a footer registers itself with the popup
+   * only once the whole body has rendered. Content that grows later says so through
+   * `onSizeChange`.
+   */
+  createEffect(checkEndsIfTracked);
 
   const value: ScrollableContextValue = {
     get scrollPosition() {
@@ -285,7 +323,13 @@ export default function Scrollable(props: {
     },
     onSizeChange,
     setScrollPositionSilently,
-    checkForTriggers
+    checkForTriggers,
+    get isScrolledToStart() {
+      return isScrolledToStart();
+    },
+    get isScrolledToEnd() {
+      return isScrolledToEnd();
+    }
   };
 
   if(props.contextRef) {
@@ -305,6 +349,7 @@ export default function Scrollable(props: {
   let ref: HTMLDivElement, thumbRef: HTMLDivElement;
   return (
     <div
+      tabIndex={Modes.a11y ? props.tabIndex : undefined}
       ref={(_ref) => {
         ref = _ref;
         (props.ref as any)?.(_ref);

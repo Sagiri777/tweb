@@ -8,6 +8,8 @@ import type {MyStickerSetInput} from '@lib/appManagers/utils/stickers/constants'
 export type ReferenceContext =
   ReferenceContext.referenceContextProfilePhoto |
   ReferenceContext.referenceContextMessage |
+  ReferenceContext.referenceContextMessageRich |
+  ReferenceContext.referenceContextMessageRichTranslation |
   ReferenceContext.referenceContextEmojiesSounds |
   ReferenceContext.referenceContextReactions |
   ReferenceContext.referenceContextUserFull |
@@ -27,7 +29,8 @@ export type ReferenceContext =
   ReferenceContext.referenceContextStickerSet |
   ReferenceContext.referenceContextAvailableEffects |
   ReferenceContext.referenceContextStickerSearch |
-  ReferenceContext.referenceContextSavedMusic;
+  ReferenceContext.referenceContextSavedMusic |
+  ReferenceContext.referenceContextDraft;
 
 export namespace ReferenceContext {
   export type referenceContextProfilePhoto = {
@@ -39,6 +42,19 @@ export namespace ReferenceContext {
     type: 'message',
     peerId: PeerId,
     messageId: number
+  };
+
+  export type referenceContextMessageRich = {
+    type: 'messageRich',
+    peerId: PeerId,
+    messageId: number
+  };
+
+  export type referenceContextMessageRichTranslation = {
+    type: 'messageRichTranslation',
+    peerId: PeerId,
+    messageId: number,
+    lang: string
   };
 
   export type referenceContextEmojiesSounds = {
@@ -133,7 +149,15 @@ export namespace ReferenceContext {
 
   export type referenceContextSavedMusic = {
     type: 'savedMusic',
-    userId: UserId
+    userId: UserId,
+    docId: DocId
+  };
+
+  /** The media of a rich draft: a topic's, or a monoforum thread's, under `threadId` */
+  export type referenceContextDraft = {
+    type: 'draft',
+    peerId: PeerId,
+    threadId?: number
   };
 }
 
@@ -238,6 +262,19 @@ export class ReferencesStorage extends AppManager {
         // });
       }
 
+      case 'messageRich':
+        return this.appMessagesManager.refreshRichMessage(
+          context.peerId,
+          context.messageId
+        );
+
+      case 'messageRichTranslation':
+        return this.appTranslationsManager.refreshRichMessageTranslation(
+          context.peerId,
+          context.messageId,
+          context.lang
+        );
+
       case 'emojiesSounds':
         return this.refreshEmojiesSoundsPromise || this.appStickersManager.getAnimatedEmojiSounds(true).then(() => {
           this.refreshEmojiesSoundsPromise = undefined;
@@ -296,7 +333,12 @@ export class ReferencesStorage extends AppManager {
         });
 
       case 'savedMusic':
-        return this.appProfileManager.getSavedMusic(context.userId, 0, 100);
+        // Ask for the exact document rather than re-reading page 0 — a track that sits deeper in
+        // the playlist would never be covered by the first page.
+        return this.appSavedMusicManager.getSavedMusicByIds(context.userId, [context.docId]);
+
+      case 'draft':
+        return this.appDraftsManager.refreshRichMessageMedia();
 
       default: {
         this.log.warn('not implemented context', context);

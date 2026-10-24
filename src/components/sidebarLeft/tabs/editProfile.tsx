@@ -1,8 +1,8 @@
-import {createEffect, createMemo, createResource, createSignal, JSX, on, onMount, Show} from 'solid-js';
+import {createEffect, createMemo, createResource, createSignal, JSX, on, onCleanup, onMount, Show} from 'solid-js';
 import {useSuperTab} from '@components/solidJsTabs/superTabProvider';
 import {usePromiseCollector} from '@components/solidJsTabs/promiseCollector';
 import {useHotReloadGuard} from '@lib/solidjs/hotReloadGuard';
-import type {AppEditProfileTab} from '@components/solidJsTabs/tabs';
+import {type AppEditProfileTab} from '@components/solidJsTabs/tabs';
 import Section from '@components/section';
 import Row from '@components/rowTsx';
 import {InputFieldTsx} from '@components/inputFieldTsx';
@@ -19,12 +19,12 @@ import PopupElement from '@components/popups/indexTsx';
 import wrapPeerTitle from '@components/wrappers/peerTitle';
 import {toastNew} from '@components/toast';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
-import {getHeavyAnimationPromise} from '@hooks/useHeavyAnimationCheck';
-import placeCaretAtEnd from '@helpers/dom/placeCaretAtEnd';
-import shake from '@helpers/dom/shake';
 import {purchaseUsernameCaption} from '@components/sidebarLeft/tabs/purchaseUsernameCaption';
-import {User, UserFull} from '@layer';
+import {BusinessWorkHours, ConnectedBot, User, UserFull} from '@layer';
+import OpeningHours from '@helpers/openingHours';
 import {trackAvatarUpload} from '@stores/avatarUpload';
+import usePremium from '@stores/premium';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 type AppEditProfileTabType = typeof AppEditProfileTab;
 
@@ -32,11 +32,8 @@ export type EditProfileTabPayload = {
   bioMaxLength: MaybePromise<number>,
   user: MaybePromise<User.user>,
   userFull: MaybePromise<UserFull.userFull>,
-  focusOn?: string
+  connectedBot: MaybePromise<ConnectedBot.connectedBot | undefined>
 };
-
-const FOCUS_KEYS = ['first-name', 'last-name', 'username', 'bio'] as const;
-type FocusKey = typeof FOCUS_KEYS[number];
 
 const EditProfileTab = () => {
   const [tab] = useSuperTab<AppEditProfileTabType>();
@@ -55,16 +52,23 @@ const EditProfileTab = () => {
 
   return (
     <Show when={data()}>
-      <EditProfileForm data={data()} focusOn={payload.focusOn} />
+      <EditProfileForm data={data()} connectedBot={payload.connectedBot} />
     </Show>
   );
 };
 
 export default EditProfileTab;
 
-type FormData = {bioMaxLength: number, user: User.user, userFull: UserFull.userFull};
+type FormData = {
+  bioMaxLength: number,
+  user: User.user,
+  userFull: UserFull.userFull
+};
 
-const EditProfileForm = (props: {data: FormData, focusOn?: string}) => {
+const EditProfileForm = (props: {
+  data: FormData,
+  connectedBot: MaybePromise<ConnectedBot.connectedBot | undefined>
+}) => {
   const [tab] = useSuperTab<AppEditProfileTabType>();
   const {user, userFull, bioMaxLength} = props.data;
 
@@ -97,6 +101,59 @@ const EditProfileForm = (props: {data: FormData, focusOn?: string}) => {
   const [personalChannelId, setPersonalChannelId] = createSignal<ChatId>(initialPersonalChannelId);
   const [personalChannelTitle, setPersonalChannelTitle] = createSignal<JSX.Element>(i18n('EditProfile.PersonalChannel.Add'));
   const [hasBirthday, setHasBirthday] = createSignal(!!userFull.birthday);
+  const premium = usePremium();
+  const [businessWorkHours, setBusinessWorkHours] = createSignal(userFull.business_work_hours);
+  const [businessLocation, setBusinessLocation] = createSignal(userFull.business_location);
+  const [connectedBot, setConnectedBot] = createSignal<ConnectedBot.connectedBot>();
+  const [connectedBotLoaded, setConnectedBotLoaded] = createSignal(false);
+  const [connectedBotLoadFailed, setConnectedBotLoadFailed] = createSignal(false);
+  const [chatAutomationTitle, setChatAutomationTitle] = createSignal<JSX.Element>(i18n('Loading'));
+
+  /** `open 24/7`, or how many days of the week have hours — the row's value. */
+  const businessHoursSummary = () => {
+    const hours = businessWorkHours() as BusinessWorkHours.businessWorkHours;
+    if(OpeningHours.is24x7(hours)) {
+      return i18n('BusinessHoursProfileFullOpen');
+    }
+
+    const openDays = OpeningHours.getDaysHours(hours.weekly_open).filter((periods) => periods.length);
+    return i18n('Days', [openDays.length]);
+  };
+
+  let cleanedUp = false;
+  let connectedBotVersion = 0;
+  onCleanup(() => cleanedUp = true);
+  const setConnectedBotFromUpdate = (bot?: ConnectedBot.connectedBot) => {
+    ++connectedBotVersion;
+    setConnectedBot(bot);
+    setConnectedBotLoadFailed(false);
+    setConnectedBotLoaded(true);
+  };
+
+  const loadConnectedBot = async(promise: MaybePromise<ConnectedBot.connectedBot | undefined>) => {
+    const requestVersion = ++connectedBotVersion;
+    setConnectedBotLoadFailed(false);
+    setConnectedBotLoaded(false);
+
+    try {
+      const bot = await Promise.resolve(promise);
+      if(cleanedUp || requestVersion !== connectedBotVersion) {
+        return false;
+      }
+
+      setConnectedBot(bot);
+      setConnectedBotLoaded(true);
+      return true;
+    } catch{
+      if(!cleanedUp && requestVersion === connectedBotVersion) {
+        setConnectedBotLoadFailed(true);
+      }
+
+      return false;
+    }
+  };
+
+  loadConnectedBot(props.connectedBot);
 
   const isPersonalChannelChanged = createMemo(() => personalChannelId() !== initialPersonalChannelId);
   const origIsChanged = editPeer.isChanged;
@@ -104,13 +161,67 @@ const EditProfileForm = (props: {data: FormData, focusOn?: string}) => {
 
   const {setUsername: setPurchaseUsername, element: purchaseEl} = purchaseUsernameCaption();
 
+  let personalChannelTitleVersion = 0;
   createEffect(on(personalChannelId, async(channelId) => {
+    const version = ++personalChannelTitleVersion;
     if(channelId) {
-      setPersonalChannelTitle(await wrapPeerTitle({peerId: channelId.toPeerId(true)}));
+      const title = await wrapPeerTitle({peerId: channelId.toPeerId(true)});
+      if(!cleanedUp && version === personalChannelTitleVersion) {
+        setPersonalChannelTitle(title);
+      }
     } else {
       setPersonalChannelTitle(i18n('EditProfile.PersonalChannel.Add'));
     }
   }));
+
+  let chatAutomationTitleVersion = 0;
+  createEffect(() => {
+    const loaded = connectedBotLoaded();
+    const failed = connectedBotLoadFailed();
+    const bot = connectedBot();
+    const version = ++chatAutomationTitleVersion;
+    if(failed) {
+      setChatAutomationTitle(i18n('ChatAutomation.LoadFailed'));
+    } else if(!loaded) {
+      setChatAutomationTitle(i18n('Loading'));
+    } else if(!bot) {
+      setChatAutomationTitle(i18n('ChatAutomation.Off'));
+    } else {
+      wrapPeerTitle({peerId: (bot.bot_id as UserId).toPeerId(false)}).then((title) => {
+        if(version === chatAutomationTitleVersion) setChatAutomationTitle(title);
+      });
+    }
+  });
+
+  tab.listenerSetter.add(rootScope)('chat_automation_update', setConnectedBotFromUpdate);
+
+  // The business sub-tabs write straight into the cached userFull, so the two rows
+  // below follow along without re-opening Edit Profile.
+  tab.listenerSetter.add(rootScope)('user_full_update', async(userId) => {
+    if(userId !== rootScope.myId.toUserId()) return;
+
+    const fresh = await tab.managers.appProfileManager.getCachedFullUser(userId);
+    if(cleanedUp || !fresh) return;
+
+    setBusinessWorkHours(fresh.business_work_hours);
+    setBusinessLocation(fresh.business_location);
+  });
+
+  const openChatAutomation = async() => {
+    if(connectedBotLoadFailed()) {
+      await loadConnectedBot(tab.managers.appBusinessManager.getConnectedBot(true));
+      if(!connectedBotLoaded()) {
+        toastNew({langPackKey: 'Error.AnError'});
+        return;
+      }
+    }
+
+    if(!connectedBotLoaded()) {
+      return;
+    }
+
+    tab.slider.createTab(hotReloadGuard.tabs.AppChatAutomationTab).open({connectedBot: connectedBot()});
+  };
 
   const openPersonalChannelPicker = async() => {
     let channelIds: ChatId[];
@@ -205,25 +316,6 @@ const EditProfileForm = (props: {data: FormData, focusOn?: string}) => {
     bioInputField.setOriginalValue(userFull.about, true);
     usernameInputField.setOriginalValue(getPeerEditableUsername(user), true);
     editPeer.handleChange();
-
-    const focusOn = props.focusOn as FocusKey | 'set-photo' | undefined;
-    if(!focusOn) return;
-
-    getHeavyAnimationPromise().then(() => {
-      const focusMap: Record<FocusKey, InputField | undefined> = {
-        'first-name': firstNameInputField,
-        'last-name': lastNameInputField,
-        'username': usernameInputField,
-        'bio': bioInputField
-      };
-
-      const target = focusMap[focusOn as FocusKey];
-      if(target) {
-        placeCaretAtEnd(target.input);
-      } else if(focusOn === 'set-photo') {
-        shake(editPeer.avatarElem.node);
-      }
-    });
   });
 
   return (
@@ -272,7 +364,7 @@ const EditProfileForm = (props: {data: FormData, focusOn?: string}) => {
               }
             });
           }}>
-            <Row.Icon icon="gift" />
+            <Row.Icon icon="gift_filled" />
             <Row.Title>{i18n('EditProfile.AddBirthdayRow')}</Row.Title>
           </Row>
         </Show>
@@ -289,25 +381,59 @@ const EditProfileForm = (props: {data: FormData, focusOn?: string}) => {
         }}
       />
 
-      {(() => {
-        const section = new UsernamesSection({
-          peerId: rootScope.myId,
-          peer: user,
-          listenerSetter: tab.listenerSetter,
-          usernameInputField,
-          middleware: tab.middlewareHelper.get()
-        });
-        return section.container;
-      })()}
+      <UsernamesSection
+        peerId={rootScope.myId}
+        peer={user}
+        usernameInputField={usernameInputField}
+      />
 
       <Section
         name="EditProfile.PersonalChannel.Title"
         caption="EditProfile.PersonalChannel.Description"
       >
         <Row clickable={openPersonalChannelPicker}>
-          <Row.Icon icon="newchannel" />
-          <Row.Title titleRight={<span class="primary">{personalChannelTitle()}</span>}>
-            {i18n('EditProfile.PersonalChannel.Label')}
+          <Row.Icon icon="newchannel_filled" />
+          <Row.Title titleRight={!personalChannelId() && <span class="primary">{personalChannelTitle()}</span>}>
+            {personalChannelId() ? personalChannelTitle() : i18n('EditProfile.PersonalChannel.Label')}
+          </Row.Title>
+        </Row>
+      </Section>
+
+      <Section
+        name="TelegramBusiness"
+        caption={i18n(premium() ? 'TelegramBusinessSubscribedSubtitle' : 'TelegramBusinessSubtitle')}
+      >
+        <Row clickable={() => hotReloadGuard.tabs.openBusinessEditorTab(tab.slider, hotReloadGuard.tabs.AppBusinessHoursTab)}>
+          <Row.Icon icon="time_filled" />
+          <Row.Title
+            titleRight={businessWorkHours() ? businessHoursSummary() : i18n('Off')}
+            titleRightSecondary
+          >
+            {i18n('BusinessHours')}
+          </Row.Title>
+        </Row>
+        <Row clickable={() => hotReloadGuard.tabs.openBusinessEditorTab(tab.slider, hotReloadGuard.tabs.AppBusinessLocationTab)}>
+          <Row.Icon icon="location_filled" />
+          <Row.Title
+            titleRight={businessLocation()?.address || i18n('Off')}
+            titleRightSecondary
+          >
+            {i18n('BusinessLocation')}
+          </Row.Title>
+        </Row>
+      </Section>
+
+      <Section
+        name="ChatAutomation.Title"
+        caption="ChatAutomation.ProfileDescription"
+      >
+        <Row
+          disabled={!connectedBotLoaded() && !connectedBotLoadFailed()}
+          clickable={openChatAutomation}
+        >
+          <Row.Icon icon="bot_filled" />
+          <Row.Title titleRight={!connectedBot() && <span class="primary">{chatAutomationTitle()}</span>}>
+            {connectedBot() ? chatAutomationTitle() : i18n('ChatAutomation.ProfileLabel')}
           </Row.Title>
         </Row>
       </Section>

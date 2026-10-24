@@ -1,9 +1,11 @@
 import setInnerHTML from '@helpers/dom/setInnerHTML';
+import replaceContent from '@helpers/dom/replaceContent';
 import {GroupCall} from '@layer';
-import GroupCallInstance from '@lib/calls/groupCallInstance';
+import type GroupCallInstance from '@lib/calls/groupCallInstance';
 import {NULL_PEER_ID} from '@appManagers/constants';
 import wrapEmojiText from '@lib/richTextProcessor/wrapEmojiText';
 import PeerTitle from '@components/peerTitle';
+import {i18n} from '@lib/langPack';
 
 export default class GroupCallTitleElement {
   private peerTitle: PeerTitle;
@@ -23,14 +25,13 @@ export default class GroupCallTitleElement {
     // TdE2E conferences don't have a backing chat — use a plain title.
     // Eventually this can list participant names.
     if(instance.e2e && (!instance.chatId || instance.chatId === NULL_PEER_ID)) {
-      setInnerHTML(appendTo, wrapEmojiText('Encrypted call'));
+      replaceContent(appendTo, i18n('ConferenceCall.Title'));
       return;
     }
 
     const peerId = instance.chatId.toPeerId(true);
-    if(peerTitle.options.peerId !== peerId) {
-      peerTitle.options.peerId = peerId;
-      peerTitle.update();
+    if(peerTitle.options.peerId !== peerId || peerTitle.options.accountNumber !== instance.accountNumber) {
+      peerTitle.update({peerId, accountNumber: instance.accountNumber});
     }
 
     if(peerTitle.element.parentElement !== appendTo) {

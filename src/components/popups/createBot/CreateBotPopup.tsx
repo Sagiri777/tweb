@@ -1,5 +1,7 @@
+import MediaHeader from '@components/mediaHeader';
 import styles from '@components/popups/createBot/createBot.module.scss';
 import PopupElement from '@components/popups/indexTsx';
+import Section from '@components/section';
 import SimpleFormField from '@components/simpleFormField';
 import Space from '@components/space';
 import {createMutation} from '@helpers/solid/createMutation';
@@ -7,6 +9,7 @@ import {I18nTsx} from '@helpers/solid/i18n';
 import {LangPackKey} from '@lib/langPack';
 import {useHotReloadGuard} from '@lib/solidjs/hotReloadGuard';
 import {createComputed, createMemo, createSignal, on, onCleanup, Show} from 'solid-js';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 
 const USERNAME_SUFFIX = 'bot';
@@ -76,6 +79,7 @@ const CreateBotPopup = (props: CreateBotPopupProps) => {
 
   // Constantly check username availability when it changes
   createComputed(on(usernameValue, (value) => {
+    const managers = bindManagersToSession(rootScope.managers);
     const localResult = validateUsernameLocally(value);
     if(localResult) {
       setUsernameStatus(localResult);
@@ -91,7 +95,7 @@ const CreateBotPopup = (props: CreateBotPopupProps) => {
 
       const fullUsername = value + USERNAME_SUFFIX;
 
-      const result = await rootScope.managers.appBotsManager.checkUsername(fullUsername);
+      const result = await managers.appBotsManager.checkUsername(fullUsername);
       if(cancelled) return;
 
       if(usernameValue() !== value) return; // out-of-date result
@@ -153,27 +157,28 @@ const CreateBotPopup = (props: CreateBotPopupProps) => {
   });
 
   return (
-    <PopupElement class={styles.popup} containerClass={styles.popupContainer} show={show()}>
-      <PopupElement.Header class={styles.popupHeader}>
-        <PopupElement.CloseButton class={styles.popupCloseButton} />
+    <PopupElement class={styles.popup} show={show()}>
+      <PopupElement.Header floating>
+        <PopupElement.CloseButton />
       </PopupElement.Header>
       <PopupElement.Body class={styles.popupBody}>
-        <div class={styles.header}>
-          <div class={styles.avatar}>
-            <AvatarNewTsx peerId={props.requestingPeerId} size={120} />
-          </div>
-
-          <I18nTsx class={styles.title} key="CreateBot.Title" />
-
-          <div class={styles.subtitle}>
+        <MediaHeader marginTop marginBottom>
+          <MediaHeader.Sticker
+            size={120}
+            element={<AvatarNewTsx peerId={props.requestingPeerId} size={120} />}
+          />
+          <MediaHeader.Title>
+            <I18nTsx key="CreateBot.Title" />
+          </MediaHeader.Title>
+          <MediaHeader.Subtitle color="secondary">
             <I18nTsx
               key="CreateBot.Description"
               args={[<PeerTitleTsx peerId={props.requestingPeerId} />]}
             />
-          </div>
-        </div>
+          </MediaHeader.Subtitle>
+        </MediaHeader>
 
-        <div class={styles.section}>
+        <Section caption="CreateBot.Name.Caption">
           <SimpleFormField
             value={botName()}
             onChange={setBotName}
@@ -187,15 +192,29 @@ const CreateBotPopup = (props: CreateBotPopupProps) => {
               maxLength={MAX_BOT_NAME_LENGTH}
             />
           </SimpleFormField>
-        </div>
+        </Section>
 
-        <div class={styles.caption}>
-          <I18nTsx key="CreateBot.Name.Caption" />
-        </div>
-
-        <Space amount='1rem' />
-
-        <div class={styles.section}>
+        <Section caption={
+          <Show
+            when={usernameStatus().state === 'available'}
+            fallback={
+              <Show when={usernameStatusKey()}>
+                <span class={usernameStatusClass()}>
+                  <I18nTsx key={usernameStatusKey()} />
+                </span>
+              </Show>
+            }
+          >
+            <I18nTsx
+              key="CreateBot.Link"
+              args={[
+                <span class={styles.linkInfoLink} dir="ltr">
+                  t.me/{fullUsername()}
+                </span>
+              ]}
+            />
+          </Show>
+        }>
           <SimpleFormField
             class={styles.usernameField}
             value={usernameValue()}
@@ -221,39 +240,9 @@ const CreateBotPopup = (props: CreateBotPopupProps) => {
               <span class={styles.usernameOverlaySuffix}>{USERNAME_SUFFIX}</span>
             </div>
           </SimpleFormField>
-        </div>
-
-        <div class={styles.caption}>
-          <Show
-            when={usernameStatus().state === 'available'}
-            fallback={
-              <Show when={usernameStatusKey()}>
-                <span class={usernameStatusClass()}>
-                  <I18nTsx key={usernameStatusKey()} />
-                </span>
-              </Show>
-            }
-          >
-            <I18nTsx
-              key="CreateBot.Link"
-              args={[
-                <span class={styles.linkInfoLink}>
-                  t.me/{fullUsername()}
-                </span>
-              ]}
-            />
-          </Show>
-        </div>
+        </Section>
       </PopupElement.Body>
-      <PopupElement.Footer class={styles.popupFooter}>
-        <PopupElement.FooterButton
-          color='secondary'
-          langKey="Cancel"
-          callback={() => {
-            setShow(false);
-            return true;
-          }}
-        />
+      <PopupElement.Footer>
         <PopupElement.FooterButton
           disabled={!isValid() || submitMutation.isPending()}
           langKey="CreateBot.Create"

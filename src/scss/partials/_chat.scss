@@ -33,11 +33,6 @@
     padding-top: 12px;
 	}
 
-	.menu-send {
-		top: auto;
-    bottom: calc(100% + .5rem);
-	}
-
   .chat-input-secondary-button {
     padding: 0;
   }
@@ -90,9 +85,7 @@
 		}
 
 		&.show.backwards {
-			@include animation-level(2) {
-				animation: hide-icon .4s forwards ease-in-out !important;
-			}
+			@include animation-level-icon-out(true);
 		}
 	}
 
@@ -101,9 +94,7 @@
 		display: none !important;
 		margin: 0 !important;
 
-		@include animation-level(2) {
-			animation: grow-icon .4s forwards ease-in-out !important;
-		}
+		@include animation-level-icon-in(true);
 	}
 
 	&:not(.is-recording) {
@@ -112,28 +103,20 @@
 		}
 	}
 
+  &.is-message-input-expanded:not(.is-recording),
+  &.is-message-input-resizing:not(.is-recording) {
+    .float.show:not(.hide) {
+      display: none !important;
+      pointer-events: none;
+    }
+  }
+
 	.btn-send-container {
 		position: relative;
 		flex: 0 0 auto;
     display: flex;
     align-items: center;
     justify-content: center;
-
-    .btn-menu-overlay {
-			z-index: 3;
-		}
-
-    @include respond-to(until-floating-left-sidebar) {
-      .btn-menu-reactions {
-        &-container {
-          --bubble-side-offset: 0;
-        }
-
-        &-bubble {
-          display: none;
-        }
-      }
-    }
 	}
 
 	.btn-icon {
@@ -145,18 +128,16 @@
 	}
 
 	.btn-send {
+    --size: 2.5rem;
     color: #fff !important;
     background-color: var(--primary-color) !important;
 		z-index: 3;
     opacity: 1 !important;
-    min-width: 3rem;
-    border-radius: 1.25rem !important;
-    height: 2.5rem !important;
+    min-width: var(--size);
+    border-radius: 50% !important;
+    height: var(--size) !important;
     margin: 0 !important;
-
-    .is-rtl & {
-      transform: scaleX(-1);
-    }
+    width: var(--size);
 
     @include hover() {
       background-color: var(--dark-primary-color) !important;
@@ -175,6 +156,7 @@
     .btn-send-icon-send {
       margin-inline-start: -3px;
       margin-bottom: -1px;
+      font-size: 1.375rem;
     }
 
 		&.send .btn-send-icon-send,
@@ -182,11 +164,28 @@
 		&.record-video .btn-send-icon-record-video,
 		&.edit .btn-send-icon-edit,
 		&.schedule .btn-send-icon-schedule,
+    &.stop .btn-send-icon-stop,
     &.forward .btn-send-icon-forward {
 			visibility: visible !important;
-      animation: grow-icon .4s forwards ease-in-out !important;
+      @include animation-level-icon-in(true);
 		}
 	}
+
+  &.is-ephemeral-composer {
+    .btn-send {
+      box-shadow: 0 0 0 2px var(--surface-color), 0 0 0 4px var(--primary-color);
+    }
+
+    .btn-send-stars-badge {
+      display: none;
+    }
+  }
+
+  .reply-title-ephemeral-icon {
+    margin-inline-end: .25rem;
+    font-size: 1rem;
+    vertical-align: -2px;
+  }
 
 	.btn-record-cancel,
   .btn-send {
@@ -268,13 +267,18 @@
 
   &-ai-editor-button {
     position: absolute;
-    top: 0.25rem;
-    right: 0.75rem;
-    --button-size: 2rem;
+    top: var(--padding-vertical);
+    inset-inline-end: var(--padding-horizontal);
+
+    // it stays mounted while the field is too short for it, and `.btn-icon`'s `display: flex`
+    // outranks the attribute — a caption's button then sat over the popup's Send and took its clicks
+    &[hidden] {
+      display: none;
+    }
 
     &__icon {
       pointer-events: none;
-      font-size: 1.25rem;
+      font-size: 1.5rem;
     }
 
     &__star-1 {
@@ -286,6 +290,23 @@
       opacity: 0;
       animation: chat-input-ai-editor-button-star-animation 3.2s ease-in-out 0.32s forwards;
     }
+  }
+}
+
+.ephemeral-context-about {
+  pointer-events: none;
+  cursor: default;
+  white-space: normal;
+  line-height: 1.25rem;
+}
+
+.ephemeral-context-revert {
+  display: flex;
+  flex-direction: column;
+
+  &-about {
+    font-size: var(--font-size-12);
+    line-height: var(--line-height-12);
   }
 }
 
@@ -307,6 +328,61 @@
   }
 }
 
+.message-input-editor-premium-star {
+  color: var(--primary-color);
+  display: inline-flex;
+  font-size: .625rem;
+  height: .75rem;
+  margin: 0;
+  pointer-events: none;
+  width: .75rem;
+
+  &[hidden] {
+    display: none;
+  }
+}
+
+.message-input-editor-toolbar-button,
+.markup-tooltip .btn-icon {
+  > .message-input-editor-premium-star {
+    inset-block-start: .125rem;
+    inset-inline-end: .125rem;
+    position: absolute;
+  }
+}
+
+// a submenu trigger's label sits deeper: .btn-menu-item-text > .submenu-label > .submenu-label-text > label
+.btn-menu-item-text {
+  .message-input-editor-premium-star {
+    margin-inline-start: .25rem;
+    vertical-align: text-top;
+  }
+}
+
+.chat-input-code-language-picker {
+  appearance: none;
+  background: transparent;
+  border: 0;
+  color: inherit;
+  cursor: pointer;
+  font: inherit;
+  line-height: inherit;
+  min-width: 0;
+  padding: 0;
+  text-align: start;
+}
+
+.chat-input-code-language-menu {
+  max-width: calc(100vw - 1rem);
+  width: 20rem;
+
+  .btn-menu-item-text {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+}
+
 .chat-input-main {
   --translateY: 0;
   z-index: 2; // fix safari topbar bug
@@ -317,6 +393,43 @@
   transition: transform var(--transition-standard-out);
   transform: translate3d(0, var(--translateY), 0);
 
+}
+
+.chat-input-main {
+  --rich-message-input-expanded-height: calc(
+    100% -
+    var(--chat-topbar-height) -
+    var(--topbar-floating-call-height) -
+    var(--topbar-floating-audio-height) -
+    .625rem
+  );
+
+  &.is-message-input-expanded,
+  &.is-message-input-resizing {
+    .chat-input-main-container {
+      align-items: stretch;
+      flex: 1 1 auto;
+      height: 100%;
+      min-height: 0;
+    }
+
+    .rows-wrapper-wrapper {
+      flex: 1 1 auto;
+      height: 100%;
+      min-height: 0;
+    }
+
+    .chat-rows-wrapper {
+      height: 100%;
+      justify-content: flex-end;
+      max-height: none;
+      min-height: 0;
+    }
+
+  }
+}
+
+.chat-input-main {
   &-container {
     &.is-centering {
       .new-message-wrapper {
@@ -355,13 +468,15 @@
         }
 
         .btn-send {
-          transition: $input-transition-time transform;
+          @include animation-level(2) {
+            transition: $input-transition-time transform;
+          }
         }
       }
     }
   }
 
-  @include animation-level(0) {
+  @include animation-level-below(2) {
     transition: none !important;
   }
 
@@ -449,14 +564,22 @@
 		transition: none !important;
 	}
 
+	// the centring is movement: with reduced animations the chat is where it goes at once
+	// (a phone's column still fades in and out, pages/_chats.scss)
+	@include respond-to(no-floating-left-sidebar) {
+		@include animation-level-below(2) {
+			transition: none !important;
+		}
+	}
+
 	@include respond-to(handhelds) {
 		body.is-left-column-shown & {
-			transform: translate3d(100vw, 0, 0);
+			transform: translate3d(calc(100vw * var(--reflect)), 0, 0);
 			opacity: 0;
 		}
 
 		body.is-right-column-shown & {
-			transform: translate3d(-25vw, 0, 0);
+			transform: translate3d(calc(-25vw * var(--reflect)), 0, 0);
 			opacity: 0;
 		}
 	}
@@ -464,7 +587,7 @@
 	@include respond-to(floating-left-sidebar) {
 		body.is-left-column-shown & {
 			//transform: translate3d(26.5rem, 0, 0);
-			transform: translate3d(26.5625rem, 0, 0); // + 1px to show left border
+			transform: translate3d(calc(26.5625rem * var(--reflect)), 0, 0); // + 1px to show left border
 
 			.sidebar-close-button {
         &:before {
@@ -479,18 +602,27 @@
 	height: 100%;
 }
 
+// * how much taller the input is than its one line: given only to the boxes that read it, by a rule of
+// * the chat's own (Chat.setChatInputSurplusRule) - set on the chat, a custom property is worked out
+// * anew for every element in it, and it changes on each line the input grows and each reply shown
+@property --chat-input-height-surplus {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+
 .chat {
   --chat-topbar-height: 3rem;
-  --chat-input-height-surplus: 0px;
   --pinned-floating-height: 0px;
   --chat-padding-top: calc(var(--chat-topbar-height) + var(--page-chats-padding) + var(--pinned-floating-height));
-  --chat-padding-bottom: calc(var(--chat-input-height) + var(--page-chats-padding) + var(--chat-input-height-surplus));
+  // * without the input's surplus, which whatever reads this adds of its own
+  --chat-padding-bottom: calc(var(--chat-input-height) + var(--page-chats-padding));
   --chat-input-background: var(--surface-color);
 	display: flex !important;
 	width: 100%;
 	align-items: center;
 	flex-direction: column;
-	transition: transform var(--tabs-transition), opacity var(--tabs-transition);
+	@include animation-level-transition(transform var(--tabs-transition), opacity var(--tabs-transition));
 
 	@include animation-level(0) {
 		transition: none !important;
@@ -498,10 +630,15 @@
 
   &:not(.active) {
     opacity: 0;
-    transform: translate3d(-200px, 0, 0);
+    transform: translate3d(calc(-200px * var(--reflect)), 0, 0);
 
     &:last-child {
-      transform: translate3d(200px, 0, 0);
+      transform: translate3d(calc(200px * var(--reflect)), 0, 0);
+    }
+
+    // reduced: the chats crossfade in place
+    @include animation-level-below(2) {
+      transform: none;
     }
   }
 
@@ -542,6 +679,13 @@
 	--padding: var(--padding-vertical) var(--padding-horizontal);
   --button-size: 2.5rem;
   --button-horizontal-margin: 0.25rem;
+  --message-input-editor-side-controls-width: calc(
+    var(--button-size) +
+    var(--button-size) +
+    var(--button-horizontal-margin) +
+    var(--button-horizontal-margin) +
+    var(--padding-horizontal)
+  );
 	display: flex;
 	align-items: center;
 	flex-direction: column;
@@ -557,6 +701,7 @@
 	z-index: 3;
   box-shadow: $chat-input-box-shadow;
 }
+
 
 .chat-input-control {
   position: absolute;
@@ -617,13 +762,20 @@
     font-size: 1.5rem;
     width: var(--button-size);
     height: var(--button-size);
-    color: var(--secondary-text-color);
 
     &.danger {
       color: var(--danger-color);
       --ripple-color: var(--light-danger-color);
     }
   }
+}
+
+// the welcome messages limit in the composer's place: a line of text, not a button
+.chat-input-welcome-limit {
+  display: flex;
+  align-items: center;
+  color: var(--secondary-text-color);
+  font-weight: var(--font-weight-normal);
 }
 
 .selection-wrapper,
@@ -658,6 +810,12 @@
     color: var(--primary-text-color);
     font-weight: var(--font-weight-bold);
     white-space: nowrap;
+  }
+
+  // The centre button is neutral here (plain-text count/report label with a
+  // gray hover), so the plate's primary-tinted ripple doesn't match it.
+  .chat-input-plate-button {
+    --ripple-color: var(--original-ripple-color);
   }
 }
 
@@ -723,15 +881,22 @@
   }
 }
 
+// * a send menu (sendContextMenu.ts) with no room past its end keeps the effects bar over itself,
+// * with no bubble pointing at the button
+.menu-send.effects-within-menu .btn-menu-reactions {
+  &-container {
+    --bubble-side-offset: 0;
+  }
+
+  &-bubble {
+    display: none;
+  }
+}
+
 .rows-wrapper {
   transform: none;
 
 	.attach-file {
-		&.menu-open {
-			color: var(--primary-color);
-			background-color: var(--light-primary-color) !important;
-		}
-
 		&.btn-disabled {
 			opacity: var(--disabled-opacity);
 		}
@@ -831,8 +996,8 @@
   }
 
   .input-message-input {
-    // max-height is JS-owned — see ChatInput.computeMessageInputMaxHeight()
-    // in components/chat/input.ts. The same number drives both the inline
+    // max-height is JS-owned — see RichMessageInputController.syncHeight()
+    // in components/richMessageInput/index.tsx. The same number drives both the inline
     // style.maxHeight and the scrollHeight clamp in InputFieldAnimated, so
     // `--chat-input-height-surplus` matches what the user actually sees.
 
@@ -844,17 +1009,19 @@
   }
 
 	.new-message-wrapper {
+    --message-input-editor-toolbar-inset: calc(var(--chat-input-height) + var(--padding-vertical));
     --send-as-size: 2.5rem;
     --send-as-margin-left: 0rem;
     --send-as-margin-right: .25rem;
     --send-as-total-size: calc(var(--send-as-size) + var(--send-as-margin-left) + var(--send-as-margin-right));
-    --commands-size: 2.375rem;
+    --commands-size: 2.5rem;
     --commands-margin-left: 0rem;
     --commands-margin-right: 0rem;
     --commands-total-size: calc(var(--commands-size) + var(--commands-margin-left) + var(--commands-margin-right));
     --offset-translateX: 0px;
 		align-items: flex-end;
 		min-height: var(--chat-input-height);
+		overflow: hidden;
 
     .new-message-bot-commands,
     .new-message-send-as-container {
@@ -874,7 +1041,7 @@
       background-color: var(--primary-color);
       display: flex;
       align-items: center;
-      padding: 0 .6875rem;
+      padding: 0 .75rem;
       // justify-content: center;
       margin-inline-start: var(--commands-margin-left);
       cursor: pointer;
@@ -905,7 +1072,7 @@
       }
 
       &-icon-scale {
-        transform: scale(.875);
+        transform: scale(1);
         display: flex;
         align-items: center;
         justify-content: center;
@@ -932,6 +1099,11 @@
         opacity: 0;
         pointer-events: none;
 
+        // reduced: it fades in and out where it stands
+        @include animation-level-below(2) {
+          transform: none;
+        }
+
         &.is-visible {
           &.forwards {
             transform: scale(1);
@@ -939,7 +1111,7 @@
           }
 
           &.animating {
-            transition: transform var(--transition-standard-in), opacity var(--transition-standard-in);
+            @include animation-level-transition(transform var(--transition-standard-in), opacity var(--transition-standard-in));
           }
         }
       }
@@ -1001,17 +1173,19 @@
       }
 
       &.animating {
+        // reduced: the field steps aside at once and the buttons fade in - going, they are gone
+        // at once, as it is their scale(0) that hides them
         .attach-file,
         .input-message-container {
-          transition: transform var(--transition-standard-in);
+          @include animation-level-transition(transform var(--transition-standard-in));
         }
 
         .new-message-send-as-container {
-          transition: transform var(--transition-standard-in), opacity var(--transition-standard-in);
+          @include animation-level-transition(transform var(--transition-standard-in), opacity var(--transition-standard-in));
         }
 
         .new-message-bot-commands {
-          transition: transform var(--transition-standard-in), opacity var(--transition-standard-in), width var(--transition-standard-in);
+          @include animation-level-transition(transform var(--transition-standard-in), opacity var(--transition-standard-in), width var(--transition-standard-in));
         }
       }
     }
@@ -1021,15 +1195,17 @@
 	.btn-icon {
 		flex: 0 0 auto;
 		font-size: 1.5rem;
-		color: var(--secondary-text-color);
 		// margin-block: 0 0;
     // margin-inline: var(--button-horizontal-margin);
 		padding: 0;
 		width: var(--button-size);
 		height: var(--button-size);
 
+		// * an open panel marks the icon the way an open menu marks .btn-menu-toggle — a gray
+		// * plate, not a primary repaint; overrides the global .btn-icon.active and the primary
+		// * hover tint btn-hoverable gives it
 		&.active {
-			color: var(--primary-color);
+			@include btn-icon-active-plate();
 		}
 	}
 }
@@ -1051,6 +1227,12 @@
   .scrollable {
     position: relative;
   }
+
+  .input-message-input {
+    // Override the global `.scrollable { height: 100% }`. `max-content` keeps
+    // the observed editor independent from the wrapper's transitional height.
+    height: max-content;
+  }
 }
 
 .input-message-input {
@@ -1058,27 +1240,22 @@
   background: none;
   border: none;
   width: 100%;
-  padding: .5rem 0;
+  padding: 0;
   /* height: 100%; */
   //min-height: inherit;
   overflow-y: none;
   resize: none;
   border: none;
   outline: none;
-  font-size: var(--messages-text-size);
-  line-height: var(--line-height);
+  @include rounded-font-size(var(--messages-text-size));
 
-  pre {
-    display: inline;
-    margin: 0;
-  }
-
-  .formatted-date {
-    cursor: text;
-  }
-
-  @include animation-level(2) {
-    transition: height $input-half-transition-time;
+  // The viewport no longer pins `maximum-scale` (WCAG 1.4.4 needs pinch-zoom),
+  // so iOS Safari is free to zoom the page whenever a field below 16px takes
+  // focus — and Settings lets the message text size go down to 12. Floor the
+  // composer only; bubbles keep the size the user picked. Without the a11y layer
+  // the viewport still pins it.
+  html.is-ios:where(.a11y) & {
+    font-size: max(var(--messages-text-size), 16px);
   }
 }
 
@@ -1092,7 +1269,7 @@
   position: absolute;
   inset-inline: 0;
   top: var(--chat-padding-top);
-  bottom: var(--chat-padding-bottom);
+  bottom: calc(var(--chat-padding-bottom) + var(--chat-input-height-surplus, 0px));
   margin-block: calc(var(--page-chats-padding) * -1);
 }
 
@@ -1130,7 +1307,7 @@
     }
   }
 
-	@include animation-level(0) {
+	@include animation-level-below(2) {
 		transition: none !important;
 	}
 
@@ -1172,8 +1349,10 @@
 
 	// ! WARNING, НЕЛЬЗЯ СТАВИТЬ ТРАНСФОРМ КРОМЕ TRANSLATEZ(0) НА БЛОК С OVERFLOW, ОН БУДЕТ ПРЫГАТЬ ВВЕРХ ПРИ ВКЛЮЧЕННОМ ПРАВИЛЕ И ЭТО НЕ ИСПРАВИТЬ JS'ОМ!
 
+	// * reduced animations keep this shift: it is short, the user's own doing, and
+	// * bubbles jumping aside at once read worse than them stepping over
 	&.is-selecting {
-    @include animation-level(2) {
+    @include animation-level(1) {
       .is-in .bubble-content-wrapper,
       .bubbles-group-avatar {
         transition: var(--bubble-transition-out);
@@ -1181,7 +1360,7 @@
     }
 
     &.forwards {
-      @include animation-level(2) {
+      @include animation-level(1) {
         .is-in .bubble-content-wrapper,
         .bubbles-group-avatar {
           transition: var(--bubble-transition-in);
@@ -1194,6 +1373,14 @@
 
       .bubbles-group-avatar {
         transform: translate3d(calc(2.5rem * var(--reflect)), 0, 0) scale3d(.76, .76, 1);
+      }
+
+      .bubble.selection-group-incompatible .bubble-content-wrapper {
+        transform: none;
+      }
+
+      .bubbles-group.selection-group-incompatible .bubbles-group-avatar {
+        transform: translate3d(0, 0, 0) scale3d(1, 1, 1);
       }
     }
 
@@ -1214,7 +1401,8 @@
     opacity: 1;
     visibility: visible;
 
-    @include animation-level(2) {
+    // its transform is pinned, so this is a fade
+    @include animation-level(1) {
       transition: opacity var(--layer-transition), transform var(--layer-transition), visibility 0s 0s !important;
     }
   }
@@ -1268,7 +1456,7 @@
     transition: none;
   }
 
-  @include animation-level(0) {
+  @include animation-level-below(2) {
     transition: none !important;
   }
 }
@@ -1278,14 +1466,14 @@
 	display: flex;
 	flex-direction: column;
 	margin: 0 auto;
-	min-height: calc(100% - var(--chat-padding-top) - var(--chat-padding-bottom));
+	min-height: calc(100% - var(--chat-padding-top) - var(--chat-padding-bottom) - var(--chat-input-height-surplus, 0px));
 	justify-content: flex-end;
 	max-width: calc(var(--chat-width) - var(--chat-bubbles-padding) * 2);
 	transition: transform var(--transition-standard-out);
 	transform: translateY(0);
   box-sizing: content-box;
 
-	@include animation-level(0) {
+	@include animation-level-below(2) {
 		transition: none !important;
 	}
 
@@ -1348,6 +1536,7 @@
 }
 
 .bubbles-go-down {
+	--translateY: 0;
 	cursor: default;
 	opacity: 0;
 	visibility: hidden;
@@ -1360,13 +1549,13 @@
 	cursor: default;
 	opacity: 0;
 	visibility: hidden;
-  transition: transform var(--layer-transition), opacity var(--layer-transition), visibility 0s .2s !important;
+	@include animation-level-transition(transform var(--layer-transition), opacity var(--layer-transition), visibility 0s .2s, $important: true);
 
 	&.is-visible {
 		cursor: pointer;
 		opacity: 1;
 		visibility: visible;
-		transition: transform var(--layer-transition), opacity var(--layer-transition), visibility 0s 0s !important;
+		@include animation-level-transition(transform var(--layer-transition), opacity var(--layer-transition), visibility 0s 0s, $important: true);
 	}
 
   &.is-visible + .bubbles-go-reaction {
@@ -1388,7 +1577,7 @@
   position: absolute;
 	background-color: var(--surface-color) !important;
 	border-radius: 50%;
-	color: var(--secondary-text-color);
+	color: var(--primary-text-color);
 	font-size: 1.5rem;
 	display: flex;
 	align-items: center;
@@ -1426,7 +1615,7 @@
 	bottom: calc(var(--chat-input-height) + .5rem);
 	z-index: 2;
 	overflow: visible;
-  transform: translateY(calc(var(--chat-input-height-surplus) * -1)) !important;
+  transform: translateY(var(--translateY)) translateY(calc(var(--chat-input-height-surplus, 0px) * -1)) !important;
 
   @include animation-level(2) {
     transition: transform var(--transition-standard-in);
@@ -1476,7 +1665,7 @@
     pointer-events: none;
     opacity: 0;
 
-    @include animation-level(2) {
+    @include animation-level(1) {
       transition: opacity var(--transition-standard-in);
     }
 
@@ -1484,10 +1673,6 @@
       opacity: 1;
     }
   }
-}
-
-.avatar-for-reply-markup {
-  margin-bottom: 43px;
 }
 
 .avatar-for-suggested-reply-markup {

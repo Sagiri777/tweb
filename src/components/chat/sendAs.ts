@@ -9,7 +9,7 @@ import safeAssign from '@helpers/object/safeAssign';
 import {Chat} from '@layer';
 import {AppManagers} from '@lib/managers';
 import getPeerId from '@appManagers/utils/peers/getPeerId';
-import {i18n} from '@lib/langPack';
+import I18n, {i18n} from '@lib/langPack';
 import apiManagerProxy from '@lib/apiManagerProxy';
 import {AckedResult} from '@lib/superMessagePort';
 import rootScope from '@lib/rootScope';
@@ -18,9 +18,10 @@ import {ButtonMenuItemOptions, ButtonMenuSync} from '@components/buttonMenu';
 import ButtonMenuToggle from '@components/buttonMenuToggle';
 import Icon from '@components/icon';
 import PeerTitle from '@components/peerTitle';
-import PopupPremium from '@components/popups/premium';
 import SetTransition from '@components/singleTransition';
 import getChatMembersString from '@components/wrappers/getChatMembersString';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 const SEND_AS_ANIMATION_DURATION = 300;
 
@@ -64,9 +65,12 @@ export default class ChatSendAs {
   private construct() {
     this.container = document.createElement('div');
     this.container.classList.add('new-message-send-as-container');
+    this.container.setAttribute('role', 'button');
+    (this.menuContainer ?? this.container).setAttribute('aria-label', I18n.format(this.forPaidReaction ? 'SendReactionAsTitle' : 'SendMessageAsTitle', true));
 
     this.closeBtn = document.createElement('div');
     this.closeBtn.classList.add('new-message-send-as-close', 'new-message-send-as-avatar');
+    this.closeBtn.setAttribute('aria-hidden', 'true');
     this.closeBtn.append(Icon('close'));
 
     const sendAsButtons: ButtonMenuItemOptions[] = [{
@@ -163,7 +167,7 @@ export default class ChatSendAs {
       return {
         onClick: idx ? async() => {
           if(sendAsPeer.needPremium && !rootScope.premium) {
-            PopupPremium.show();
+            hotReloadGuard.showPremiumPopup();
             return;
           }
 
@@ -317,13 +321,14 @@ export default class ChatSendAs {
     const auto = wasSkippingAnimation && !skipAnimation;
 
     const updatingPromise = this.updatingPromise = callbackify(result, async(sendAsPeerId) => {
+      const managers = bindManagersToSession(this.managers);
       if(!middleware() || sendAsPeerId === undefined) return;
 
       await this.changeSendAsPeerId(sendAsPeerId, skipAnimation);
       if(!middleware()) return;
 
       Promise.all([
-        this.managers.appChatsManager.getSendAs(chatId, this.forPaidReaction),
+        managers.appChatsManager.getSendAs(chatId, this.forPaidReaction),
         apiManagerProxy.isPremiumFeaturesHidden()
       ]).then(([sendAsPeers, isPremiumFeaturesHidden]) => {
         if(!middleware()) return;

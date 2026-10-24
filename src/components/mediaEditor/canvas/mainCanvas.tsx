@@ -7,6 +7,9 @@ import RotationWheel from '@components/mediaEditor/canvas/rotationWheel';
 import useFinalTransform from '@components/mediaEditor/canvas/useFinalTransform';
 import VideoControls from '@components/mediaEditor/canvas/videoControls';
 import {useMediaEditorContext} from '@components/mediaEditor/context';
+import {observeResize} from '@components/resizeObserver';
+import Modes from '@config/modes';
+import keepLeftToRight from '@helpers/dom/keepLeftToRight';
 import {onCleanup, onMount, Show} from 'solid-js';
 
 
@@ -22,14 +25,30 @@ export default function MainCanvas() {
       editorState.canvasSize = [bcr.width, bcr.height];
     };
     listener();
-    window.addEventListener('resize', listener);
+    if(!Modes.a11y) {
+      window.addEventListener('resize', listener);
+      onCleanup(() => {
+        window.removeEventListener('resize', listener);
+      });
+      return;
+    }
+
+    const unobserve = observeResize(container, listener);
     onCleanup(() => {
-      window.removeEventListener('resize', listener);
+      unobserve();
     });
   });
 
   return (
-    <div ref={container} class="media-editor__main-canvas">
+    <div
+      ref={(el) => {
+        container = el;
+        // * what is drawn is never mirrored, and nothing laid over it either: a text layer's alignment,
+        // * the rotation wheel's scale and the video's timeline run left to right in an RTL layout too
+        keepLeftToRight(el);
+      }}
+      class="media-editor__main-canvas"
+    >
       <Show when={editorState.canvasSize}>
         <ImageCanvas />
         <Show when={editorState.isReady}>

@@ -3,15 +3,16 @@ import {createSignal, JSX, onCleanup, onMount} from 'solid-js';
 import Button from '@components/buttonTsx';
 import PasswordInputField from '@components/passwordInputField';
 import PasswordMonkey from '@components/monkeys/password';
-import {SimpleConfirmationPopup} from '@components/popups/simpleConfirmation';
+import simpleConfirmation from '@components/popups/simpleConfirmation';
 import MediaHeader from '@components/mediaHeader';
 import {toastNew} from '@components/toast';
 import {wrapFormattedDuration} from '@components/wrappers/wrapDuration';
 import anchorCallback from '@helpers/dom/anchorCallback';
 import cancelEvent from '@helpers/dom/cancelEvent';
-import focusWhenConnected from '@helpers/dom/focusWhenConnected';
+import focusWhenSettled from '@helpers/dom/focusWhenSettled';
 import htmlToSpan from '@helpers/dom/htmlToSpan';
 import replaceContent from '@helpers/dom/replaceContent';
+import {setDirection} from '@helpers/dom/setInnerHTML';
 import formatDuration from '@helpers/formatDuration';
 import mediaSizes from '@helpers/mediaSizes';
 import {AccountPassword} from '@layer';
@@ -21,6 +22,7 @@ import wrapEmojiText from '@lib/richTextProcessor/wrapEmojiText';
 import AuthCard from '@/pages/AuthCard';
 import {CardSpec, useAuthFlow} from '@/pages/authFlow';
 import styles from '@/pages/authFlow.module.scss';
+import whenDetached from '@helpers/dom/whenDetached';
 
 if(import.meta.hot) import.meta.hot.accept();
 
@@ -68,7 +70,7 @@ export default function PasswordCard(_props: {spec: Spec}) {
         navigate({name: 'emailRecover', payload: {email_pattern: res.email_pattern}});
       }).catch(async(err: ApiError) => {
         if(err.type === 'PASSWORD_RECOVERY_NA') {
-          await SimpleConfirmationPopup.show({
+          await simpleConfirmation({
             titleLangKey: 'Login.ResetPassword.Title',
             descriptionLangKey: 'Login.ResetPassword.NoEmailText',
             button: {
@@ -77,7 +79,7 @@ export default function PasswordCard(_props: {spec: Spec}) {
             }
           });
 
-          await SimpleConfirmationPopup.show({
+          await simpleConfirmation({
             titleLangKey: 'Login.ResetAccount.Title',
             descriptionLangKey: 'Login.ResetAccount.Text',
             button: {
@@ -90,14 +92,14 @@ export default function PasswordCard(_props: {spec: Spec}) {
             navigate({name: 'signIn'});
           }).catch((err: ApiError) => {
             if(err.type === '2FA_RECENT_CONFIRM') {
-              SimpleConfirmationPopup.show({
+              simpleConfirmation({
                 titleLangKey: 'Login.ResetAccountFail.Title',
                 descriptionLangKey: 'Login.ResetAccountFail.TextCancelled',
                 button: {langKey: 'OK'}
               });
             } else if(err.type.startsWith('2FA_CONFIRM_WAIT_')) {
               const waitTime = +err.type.replace('2FA_CONFIRM_WAIT_', '');
-              SimpleConfirmationPopup.show({
+              simpleConfirmation({
                 titleLangKey: 'Login.ResetAccountFail.Title',
                 descriptionLangKey: 'Login.ResetAccountFail.TextWait',
                 descriptionArgs: [wrapFormattedDuration(formatDuration(waitTime))],
@@ -130,7 +132,10 @@ export default function PasswordCard(_props: {spec: Spec}) {
       state = _state;
 
       if(state.hint) {
-        replaceContent(passwordInputField.label, htmlToSpan(wrapEmojiText(state.hint)));
+        // the user's own words: they order by their own direction
+        const hint = htmlToSpan(wrapEmojiText(state.hint));
+        setDirection(hint);
+        replaceContent(passwordInputField.label, hint);
       } else {
         passwordInputField.setLabel();
       }
@@ -162,8 +167,8 @@ export default function PasswordCard(_props: {spec: Spec}) {
             clearInterval(getStateInterval);
             getStateInterval = undefined;
           }
+          // * the monkey stays until the card is gone (`onCleanup`): the client fades in over it
           toIm();
-          monkey?.remove();
           break;
         default:
           setSubmitting(false);
@@ -208,16 +213,21 @@ export default function PasswordCard(_props: {spec: Spec}) {
 
     getState();
 
-    cancelFocus = focusWhenConnected(passwordInput);
+    cancelFocus = focusWhenSettled(passwordInput);
   });
 
   onCleanup(() => {
     cancelFocus?.();
-    monkey?.remove();
     if(getStateInterval) {
       clearInterval(getStateInterval);
       getStateInterval = undefined;
     }
+
+    // * as in the code card: the card is kept for its exit animation after this scope is gone, and a
+    // * destroyed offscreen lottie canvas blanks at once
+    const leaving = monkey;
+    monkey = undefined;
+    whenDetached(monkeyContainer.closest<HTMLElement>('.' + styles.card), () => leaving?.remove());
   });
 
   return (
@@ -226,7 +236,7 @@ export default function PasswordCard(_props: {spec: Spec}) {
       header={
         <MediaHeader>
           <MediaHeader.Sticker element={monkeyContainer} size={monkeySize}/>
-          <MediaHeader.Title>{i18n('Login.Password.Title')}</MediaHeader.Title>
+          <MediaHeader.Title tag="h1">{i18n('Login.Password.Title')}</MediaHeader.Title>
           <MediaHeader.Subtitle>{i18n('Login.Password.Subtitle')}</MediaHeader.Subtitle>
         </MediaHeader>
       }

@@ -6,9 +6,10 @@ import rootScope from '@lib/rootScope';
 import {ConnectionStatus} from '@lib/mtproto/connectionStatus';
 import cancelEvent from '@helpers/dom/cancelEvent';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
-import {AppManagers} from '@lib/managers';
+import {TabManagers} from '@lib/managers';
 import singleInstance from '@lib/singleInstance';
 import InputSearch from '@components/inputSearch';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 const NO_STATUS = false;
 const TEST_DBLCLICK = false;
@@ -30,17 +31,23 @@ export default class ConnectionStatusComponent {
   private setFirstConnectionTimeout: number;
   private setStateTimeout: number;
 
-  private managers: AppManagers;
+  private managers: TabManagers;
   private inputSearch: InputSearch;
+  private announcement: HTMLElement;
+  private announcedKey: LangPackKey;
   private rAF: number;
 
   public construct(
-    managers: AppManagers,
+    managers: TabManagers,
     chatsContainer: HTMLElement,
     inputSearch: InputSearch
   ) {
     this.managers = managers;
     this.inputSearch = inputSearch;
+    this.announcement = document.createElement('span');
+    this.announcement.className = 'sr-only';
+    this.announcement.setAttribute('role', 'status');
+    chatsContainer.append(this.announcement);
     this.log = logger('CS', undefined, undefined);
     this.inputSearch.setPlaceholder('Search');
 
@@ -61,6 +68,12 @@ export default class ConnectionStatusComponent {
       this.updating = false;
       DEBUG && this.log('updating', this.updating);
       this.setState();
+    });
+
+    // * another account has connections of its own, and the previous one's catching up is not its
+    rootScope.addEventListener('account_switched', () => {
+      this.updating = false;
+      this.setConnectionStatus();
     });
 
     this.setFirstConnectionTimeout = window.setTimeout(
@@ -85,6 +98,7 @@ export default class ConnectionStatusComponent {
   }
 
   private setConnectionStatus = (overrideStatus?: ConnectionStatus) => {
+    const managers = bindManagersToSession(this.managers);
     Promise.all([
       rootScope.managers.apiManager.getBaseDcId(),
       rootScope.managers.rootScope.getConnectionStatus()
@@ -102,7 +116,7 @@ export default class ConnectionStatusComponent {
       const online = status && (overrideStatus ?? status.status) === ConnectionStatus.Connected;
 
       if(this.connecting && online) {
-        this.managers.apiUpdatesManager.forceGetDifference();
+        managers.apiUpdatesManager.forceGetDifference();
       }
 
       if(online && !this.hadConnect) {
@@ -119,6 +133,13 @@ export default class ConnectionStatusComponent {
 
   private wrapSetStatusText = (...args: Parameters<InputSearch['setPlaceholder']>) => {
     return () => {
+      const key = args[0] === 'Search' ? undefined :
+        args[0] === 'ConnectionStatus.ReconnectIn' || args[0] === 'ConnectionStatus.ReconnectInPlain' ?
+          'ConnectionStatus.Reconnecting' : args[0];
+      if(key !== this.announcedKey) {
+        this.announcedKey = key;
+        this.announcement.replaceChildren(...(key ? [i18n(key)] : []));
+      }
       return this.inputSearch.setPlaceholder(...args);
     };
   };

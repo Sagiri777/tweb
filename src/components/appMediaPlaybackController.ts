@@ -6,7 +6,8 @@ import {IS_APPLE, IS_SAFARI} from '@environment/userAgent';
 import {MOUNT_CLASS_TO} from '@config/debug';
 import {getAppWindow} from '@helpers/appWindow';
 import simulateEvent from '@helpers/dom/dispatchEvent';
-import {Document, DocumentAttribute, Message, PhotoSize} from '@layer';
+import {Document, Message, PhotoSize} from '@layer';
+import getAudioTitles from '@appManagers/utils/docs/getAudioTitles';
 import IS_TOUCH_SUPPORTED from '@environment/touchSupport';
 import I18n from '@lib/langPack';
 import SearchListLoader from '@helpers/searchListLoader';
@@ -15,7 +16,7 @@ import deepEqual from '@helpers/object/deepEqual';
 import clamp from '@helpers/number/clamp';
 import ListenerSetter from '@helpers/listenerSetter';
 import MusicListenTracker from '@helpers/musicListenTracker';
-import {AppManagers} from '@lib/managers';
+import {TabManagers} from '@lib/managers';
 import getMediaFromMessage from '@appManagers/utils/messages/getMediaFromMessage';
 import getPeerTitle from '@components/wrappers/getPeerTitle';
 import appDownloadManager from '@lib/appDownloadManager';
@@ -24,7 +25,12 @@ import EventListenerBase from '@helpers/eventListenerBase';
 import animationIntersector from '@components/animationIntersector';
 import apiManagerProxy from '@lib/apiManagerProxy';
 import setCurrentTime from '@helpers/dom/setCurrentTime';
+import {pinObjectURL} from '@helpers/objectUrl';
+import clearMediaElementSource from '@helpers/dom/clearMediaElementSource';
+import createMediaMetadataObjectURLPins from '@helpers/mediaMetadataObjectURLPins';
+import type {Middleware} from '@helpers/middleware';
 import ListLoader, {ListLoaderOptions} from '../helpers/listLoader';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 // TODO: Safari: проверить стрим, включить его и сразу попробовать включить видео или другую песню
 // TODO: Safari: попробовать замаскировать подгрузку последнего чанка
@@ -59,6 +65,8 @@ type MediaDetails = {
   docId: DocId,
   doc: MyDocument,
   message: Message.message,
+  consumers?: Set<Middleware>,
+  unpin?: () => void,
   clean?: boolean,
   isScheduled?: boolean,
   isSingle?: boolean
@@ -83,6 +91,7 @@ export type AddMediaArgs = {
   message: Message.message;
   autoload: boolean;
   clean?: boolean;
+  middleware?: Middleware;
   /**
    * Optional pre-extracted document. When provided, it overrides the default
    * extraction from `message.media`. Useful when the document lives in a
@@ -156,7 +165,7 @@ export class AppMediaPlaybackController extends EventListenerBase<{
   };
 
   private pip: HTMLVideoElement;
-  private managers: AppManagers;
+  private managers: TabManagers;
   private skipMediaPlayEvent: boolean;
 
   private gainAudioContext: AudioContext;
@@ -165,8 +174,9 @@ export class AppMediaPlaybackController extends EventListenerBase<{
   // Music-listen reporting (messages.reportMusicListen) — owned by MusicListenTracker; the
   // controller just forwards the play/stop events below.
   private musicListenTracker: MusicListenTracker;
+  private setMediaMetadata = createMediaMetadataObjectURLPins();
 
-  construct(managers: AppManagers) {
+  construct(managers: TabManagers) {
     this.managers = managers;
     this.musicListenTracker = new MusicListenTracker((inputDoc, listenedDuration) => {
       // Fire-and-forget analytics — swallow errors (e.g. a stale file_reference) so they don't surface.
@@ -326,6 +336,14 @@ export class AppMediaPlaybackController extends EventListenerBase<{
     return mediaType === 'voice' ? clamp(this._volume + this._boost, 0, 2) : this._volume;
   }
 
+  /**
+   * A video the controller does not play itself (one autoplaying in a chat, a peek at one) sounds as
+   * loud as everything else - or is silent, when everything is.
+   */
+  public applySharedVolume(video: HTMLVideoElement) {
+    this.applyVolumeToMedia(video, this.getVolumeForType('video'), this.muted, 'video');
+  }
+
   private applyVolumeToMedia(
     media: HTMLMediaElement,
     volume: number,
@@ -400,7 +418,7 @@ export class AppMediaPlaybackController extends EventListenerBase<{
   };
 
   public addMedia(args: AddMediaArgs): HTMLMediaElement {
-    const {message, autoload, clean, doc: docOverride, slot} = args;
+    const {message, autoload, clean, doc: docOverride, slot, middleware} = args;
     const {peerId, mid} = message;
     const storageKey = mid + (slot ?? 0);
 
@@ -413,6 +431,7 @@ export class AppMediaPlaybackController extends EventListenerBase<{
 
     let media = storage.get(storageKey);
     if(media) {
+      this.bindMediaMiddleware(media, middleware);
       return media;
     }
 
@@ -438,6 +457,7 @@ export class AppMediaPlaybackController extends EventListenerBase<{
     };
 
     this.mediaDetails.set(media, details);
+    this.bindMediaMiddleware(media, middleware);
 
     // media.autoplay = true;
     media.volume = 1;
@@ -509,13 +529,24 @@ export class AppMediaPlaybackController extends EventListenerBase<{
 
   private onMediaDocumentLoad = async(media: HTMLMediaElement) => {
     const details = this.mediaDetails.get(media);
+    if(!details) {
+      return;
+    }
+
     const doc = await this.managers.appDocsManager.getDoc(details.docId);
+    if(this.mediaDetails.get(media) !== details) {
+      return;
+    }
     if(doc.type === 'audio' && doc.supportsStreaming && SHOULD_USE_SAFARI_FIX) {
       this.handleSafariStreamable(media);
     }
 
     // setTimeout(() => {
     const cacheContext = apiManagerProxy.getCacheContext(doc);
+    // * playback needs the blob URL alive for seeks/loops — pin it until the
+    // * media element is removed
+    details.unpin?.();
+    details.unpin = pinObjectURL(cacheContext.url);
     media.src = cacheContext.url;
 
     if(this.playingMedia === media) {
@@ -536,6 +567,65 @@ export class AppMediaPlaybackController extends EventListenerBase<{
       }
     }
   };
+
+  private bindMediaMiddleware(media: HTMLMediaElement, middleware?: Middleware) {
+    if(!middleware) {
+      return;
+    }
+
+    const details = this.mediaDetails.get(media);
+    const consumers = details.consumers ??= new Set();
+    if(consumers.has(middleware)) {
+      return;
+    }
+
+    consumers.add(middleware);
+    details.clean = false;
+    middleware.onClean(() => {
+      if(this.mediaDetails.get(media) !== details) {
+        return;
+      }
+
+      consumers.delete(middleware);
+      if(consumers.size) {
+        return;
+      }
+
+      if(media === this.playingMedia) {
+        details.clean = true;
+      } else {
+        this.removeMedia(media);
+      }
+    });
+  }
+
+  private removeMedia(media: HTMLMediaElement) {
+    const details = this.mediaDetails.get(media);
+    if(!details) {
+      return;
+    }
+
+    clearMediaElementSource(media);
+    details.unpin?.();
+    details.unpin = undefined;
+    const storage = (details.isScheduled ? this.scheduled : this.media).get(details.peerId);
+    storage?.delete(details.storageKey);
+    if(!storage?.size) {
+      (details.isScheduled ? this.scheduled : this.media).delete(details.peerId);
+    }
+    this.waitingDocumentsForLoad[details.docId]?.delete(media);
+    const waiting = (details.isScheduled ?
+      this.waitingScheduledMediaForLoad :
+      this.waitingMediaForLoad).get(details.peerId);
+    waiting?.delete(details.storageKey);
+    if(!waiting?.size) {
+      (details.isScheduled ?
+        this.waitingScheduledMediaForLoad :
+        this.waitingMediaForLoad).delete(details.peerId);
+    }
+    media.remove();
+    this.mediaDetails.delete(media);
+  }
 
   // safari подгрузит последний чанк и песня включится,
   // при этом этот чанк нельзя руками отдать из SW, потому что браузер тогда теряется
@@ -598,6 +688,7 @@ export class AppMediaPlaybackController extends EventListenerBase<{
   }
 
   private async setNewMediadata(message: Message.message, playingMedia = this.playingMedia) {
+    const managers = bindManagersToSession(this.managers);
     if(getAppWindow().document.pictureInPictureElement) {
       return;
     }
@@ -636,7 +727,7 @@ export class AppMediaPlaybackController extends EventListenerBase<{
       }
     } else if(isVoice) {
       const peerId = message.fromId || message.peerId;
-      const peerPhoto = await this.managers.appPeersManager.getPeerPhoto(peerId);
+      const peerPhoto = await managers.appPeersManager.getPeerPhoto(peerId);
       if(peerPhoto) {
         // const result = this.managers.appAvatarsManager.loadAvatar(peerId, peerPhoto, 'photo_small');
         // if(result.cached) {
@@ -662,9 +753,9 @@ export class AppMediaPlaybackController extends EventListenerBase<{
     }
 
     if(!isVoice) {
-      const attribute = doc.attributes.find((attribute) => attribute._ === 'documentAttributeAudio') as DocumentAttribute.documentAttributeAudio;
-      title = attribute?.title ?? doc.file_name;
-      artist = attribute?.performer;
+      const titles = getAudioTitles(doc);
+      title = titles?.title;
+      artist = titles?.performer;
     }
 
     if(!artwork.length) {
@@ -694,13 +785,19 @@ export class AppMediaPlaybackController extends EventListenerBase<{
       }
     }
 
+    // * the track went while its sender was read (another track, an account switch that stopped it): the
+    // * OS media panel is not given the name of what no longer plays
+    if(this.playingMedia !== playingMedia) {
+      return;
+    }
+
     const metadata = new MediaMetadata({
       title,
       artist,
       artwork
     });
 
-    navigator.mediaSession.metadata = metadata;
+    this.setMediaMetadata(metadata);
   }
 
   public setCurrentMediadata() {
@@ -738,6 +835,11 @@ export class AppMediaPlaybackController extends EventListenerBase<{
       message,
       media: playingMedia,
       isSavedMusic: Boolean(message.pFlags.fakeForSavedMusic),
+      /**
+       * The message was built only to render a row (the music picker's preview list) and lives
+       * nowhere else — there is no chat message behind it to open.
+       */
+      isLocal: Boolean(message.pFlags.local),
       /**
        * True when the media was added with a non-zero `slot` (e.g. poll
        * description / explanation audio). Such media is played in isolation:
@@ -929,21 +1031,7 @@ export class AppMediaPlaybackController extends EventListenerBase<{
     if(media === this.playingMedia) {
       const details = this.mediaDetails.get(media);
       if(details?.clean) {
-        media.src = '';
-        const peerId = details.peerId;
-        const s = details.isScheduled ? this.scheduled : this.media;
-        const storage = s.get(peerId);
-        if(storage) {
-          storage.delete(details.storageKey);
-
-          if(!storage.size) {
-            s.delete(peerId);
-          }
-        }
-
-        media.remove();
-
-        this.mediaDetails.delete(media);
+        this.removeMedia(media);
       }
 
       this.playingMedia = undefined;
@@ -956,6 +1044,29 @@ export class AppMediaPlaybackController extends EventListenerBase<{
 
     return true;
   };
+
+  /**
+   * The tab moves to another account: the playback stops, and none of the previous account's media
+   * may answer for a message of the new one - the ids of a private chat's messages repeat across accounts.
+   */
+  public resetForAccountSwitch() {
+    this.stop(undefined, true);
+    for(const media of [...this.mediaDetails.keys()]) {
+      this.removeMedia(media);
+    }
+
+    // * it listens to the history it plays from - the previous account's
+    this.listLoader?.cleanup();
+    this.listLoader =
+      this.searchContext =
+      this.willBePlayedMedia =
+      undefined;
+
+    // * the OS media panel goes on naming the last track and its sender otherwise, its artwork pinned
+    if(navigator.mediaSession) {
+      this.setMediaMetadata(null);
+    }
+  }
 
   public playItem = (item: MediaItem) => {
     const {peerId, mid} = item;
@@ -1239,6 +1350,9 @@ export class AppMediaPlaybackController extends EventListenerBase<{
   }
 }
 
+// made once: a hot update keeps it and moves it onto the edited class (see @helpers/hotRegistry)
 const appMediaPlaybackController = new AppMediaPlaybackController();
 MOUNT_CLASS_TO.appMediaPlaybackController = appMediaPlaybackController;
 export default appMediaPlaybackController;
+
+if(import.meta.hot) import.meta.hot.accept();

@@ -5,23 +5,21 @@ import wrapSticker from '@components/wrappers/sticker';
 import LazyLoadQueue from '@components/lazyLoadQueue';
 import {putPreloader} from '@components/putPreloader';
 import animationIntersector, {AnimationItemGroup} from '@components/animationIntersector';
-import appImManager from '@lib/appImManager';
 import mediaSizes from '@helpers/mediaSizes';
 import {i18n} from '@lib/langPack';
 import findUpClassName from '@helpers/dom/findUpClassName';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
 import {toastNew} from '@components/toast';
 import createStickersContextMenu from '@helpers/dom/createStickersContextMenu';
-import attachStickerViewerListeners from '@components/stickerViewer';
+import attachMediaPeekListeners from '@components/mediaPeek';
 import {Document, StickerSet} from '@layer';
-import Row from '@components/row';
+import RowTsx from '@components/rowTsx';
 import rootScope from '@lib/rootScope';
 import wrapCustomEmoji from '@components/wrappers/customEmoji';
 import emoticonsDropdown from '@components/emoticonsDropdown';
 import ButtonMenuToggle from '@components/buttonMenuToggle';
 import {copyTextToClipboard} from '@helpers/clipboard';
 import wrapRichText from '@lib/richTextProcessor/wrapRichText';
-import {onMediaCaptionClick} from '@components/appMediaViewer';
 import DEBUG from '@config/debug';
 import {ButtonMenuItemOptionsVerifiable} from '@components/buttonMenu';
 import appDownloadManager from '@lib/appDownloadManager';
@@ -31,6 +29,10 @@ import ListenerSetter from '@helpers/listenerSetter';
 import {createSignal, JSX, onCleanup, onMount, Show, untrack, useContext} from 'solid-js';
 import {subscribeOn} from '@helpers/solid/subscribeOn';
 import MyShow from '@helpers/solid/myShow';
+import Button from '@components/button';
+import {wrapSolidComponent} from '@helpers/solid/wrapSolidComponent';
+import isStickerSetAdded from '@appManagers/utils/stickers/isStickerSetAdded';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 const ANIMATION_GROUP: AnimationItemGroup = 'STICKERS-POPUP';
 export const STICKERS_POPUP_KIND = Symbol('stickers-popup');
@@ -40,7 +42,7 @@ const TEST_LOADING_DELAY = 0;
 export default function showStickersPopup(
   stickerSetInput: Parameters<AppStickersManager['getStickerSet']>[0] | Parameters<AppStickersManager['getStickerSet']>[0][],
   isEmojisInitial?: boolean,
-  chatInput: ChatInput = appImManager.chat?.input
+  chatInput: ChatInput = hotReloadGuard.appImManager.chat?.input
 ) {
   const [show, setShow] = createSignal(true);
 
@@ -85,9 +87,9 @@ export default function showStickersPopup(
       if(sets.length === 1) {
         const firstSet = sets[0];
         buttonAppend = i18n(isEmojis ? 'EmojiCount' : 'Stickers', [firstSet.count]);
-        add = !firstSet.installed_date;
+        add = !isStickerSetAdded(firstSet);
       } else {
-        const installed = sets.filter((set) => set.installed_date);
+        const installed = sets.filter(isStickerSetAdded);
         let count: number;
         if(sets.length === installed.length) {
           add = false;
@@ -107,7 +109,7 @@ export default function showStickersPopup(
       const idx = sets.findIndex((s) => s.id === set.id);
       if(idx === -1) return;
       sets[idx] = set;
-      updateAddedMap[set.id]?.(!!set.installed_date);
+      updateAddedMap[set.id]?.(isStickerSetAdded(set));
       updateButton();
     };
 
@@ -118,20 +120,27 @@ export default function showStickersPopup(
       const container = document.createElement('div');
       container.classList.add('sticker-set');
 
-      let headerRow: Row, setUpdateAdded: (added: boolean) => void;
+      let headerRow: {container: HTMLElement, buttonRight: HTMLElement};
+      let setUpdateAdded: (added: boolean) => void;
       if(set) {
-        headerRow = new Row({
-          title: wrapRichText(set.title),
-          subtitle: i18n(set.pFlags.emojis ? 'EmojiCount' : 'Stickers', [set.count]),
-          buttonRight: true
-        });
+        const buttonRight = Button('btn-primary btn-color-primary btn-control-small');
+        const row = wrapSolidComponent(() => (
+          <RowTsx>
+            <RowTsx.Title>{wrapRichText(set.title)}</RowTsx.Title>
+            <RowTsx.Subtitle>
+              {i18n(set.pFlags.emojis ? 'EmojiCount' : 'Stickers', [set.count])}
+            </RowTsx.Subtitle>
+            <RowTsx.RightContent element={buttonRight} />
+          </RowTsx>
+        ), middleware);
+        headerRow = {container: row, buttonRight};
 
         setUpdateAdded = (added) => {
           headerRow.buttonRight.replaceChildren(i18n(added ? 'Stickers.SearchAdded' : 'Stickers.SearchAdd'));
           headerRow.buttonRight.classList.toggle('active', added);
         };
 
-        setUpdateAdded(!!set.installed_date);
+        setUpdateAdded(isStickerSetAdded(set));
         container.append(headerRow.container);
       }
 
@@ -157,7 +166,7 @@ export default function showStickersPopup(
 
       const shouldHide = isEmojis ?
         chatInput.onEmojiSelected(emoji, false) :
-        await appImManager.chat.input.sendMessageWithDocument({document: docId, target});
+        await hotReloadGuard.appImManager.chat.input.sendMessageWithDocument({document: docId, target});
       if(shouldHide) handle.hide();
     };
 
@@ -275,6 +284,21 @@ export default function showStickersPopup(
         }
       }];
 
+      // one set only: several at once are the custom emoji of a message, and emoji packs don't go to the archive
+      if(rawSets.length === 1 && !isEmojis) {
+        buttons.push({
+          icon: 'archive',
+          text: 'StickerSet.Archive',
+          onClick: () => managers.appStickersManager.archiveStickerSet(sets[0]).then(() => {
+            toastNew({langPackKey: 'StickerSet.Archived'});
+            handle.hide();
+          }, () => {
+            toastNew({langPackKey: 'Error.AnError'});
+          }),
+          verify: () => isStickerSetAdded(sets[0])
+        });
+      }
+
       if(DEBUG) {
         buttons.push({
           icon: 'download',
@@ -292,6 +316,7 @@ export default function showStickersPopup(
 
       const buttonMenu = ButtonMenuToggle({
         listenerSetter,
+        buttonOptions: {ariaLabel: 'MultiAccount.More'},
         buttons,
         direction: 'bottom-left'
       });
@@ -307,10 +332,10 @@ export default function showStickersPopup(
     };
 
     onMount(() => {
-      attachStickerViewerListeners({listenTo: scrollableEl, listenerSetter});
+      attachMediaPeekListeners({listenTo: scrollableEl, listenerSetter});
 
       const onContainerClick = (e: MouseEvent) => {
-        const callback = onMediaCaptionClick(containerEl, e);
+        const callback = hotReloadGuard.onMediaCaptionClick(containerEl, e);
         if(callback) {
           deferredCloseCallbacks.push(callback);
           handle.hide();
@@ -333,17 +358,17 @@ export default function showStickersPopup(
           <PopupElement.Title>{titleContent()}</PopupElement.Title>
           {menuEl()}
         </PopupElement.Header>
-        <PopupElement.Body>
-          <PopupElement.Scrollable
+        <PopupElement.Scrollable
             ref={scrollableEl}
             class={!isLoaded() && 'is-loading'}
             withBorders="top"
           >
+          <PopupElement.Body>
             <Show when={isLoaded()} fallback={putPreloader(undefined, true)}>
               {containers()}
             </Show>
-          </PopupElement.Scrollable>
-        </PopupElement.Body>
+          </PopupElement.Body>
+        </PopupElement.Scrollable>
         <PopupElement.Footer floating={isLoaded()}>
           <PopupElement.FooterButton
             noRipple

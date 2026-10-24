@@ -1,8 +1,8 @@
-import {Accessor, Signal, createContext, createRoot, createSignal, useContext} from 'solid-js';
+import {Accessor, createContext, createRoot, createSignal, useContext} from 'solid-js';
 
 import rootScope from '@lib/rootScope';
 import {AuthState} from '@types';
-import {AuthSentCode} from '@layer';
+import {AccountSentEmailCode, AuthSentCode} from '@layer';
 
 /**
  * Centralised auth-flow router & shared context.
@@ -25,6 +25,8 @@ import {AuthSentCode} from '@layer';
 export type CardName =
   | 'signIn'
   | 'authCode'
+  | 'emailSetup'
+  | 'emailSetupCode'
   | 'password'
   | 'signUp'
   | 'emailRecover'
@@ -34,6 +36,12 @@ export type CardName =
 export type CardPayloadMap = {
   signIn: void;
   authCode: AuthSentCode.authSentCode & {phone_number?: string};
+  emailSetup: {phone_number: string, phone_code_hash: string};
+  emailSetupCode: {
+    phone_number: string,
+    phone_code_hash: string,
+    sentCode: AccountSentEmailCode.accountSentEmailCode
+  };
   password: void;
   signUp: {phone_number: string, phone_code_hash: string};
   emailRecover: {email_pattern: string};
@@ -77,13 +85,7 @@ export type AuthFlowContextValue = {
  * `<AuthCardsHost>` reads `currentCard()`; imperative callers write through
  * `navigateAuth()`.
  */
-const [currentCard, setCurrentCard] = (() => {
-  const stored = (import.meta.hot?.data as any)?.currentCardSignal as Signal<CardSpec | null> | undefined;
-  if(stored) return stored;
-  const pair = createRoot(() => createSignal<CardSpec | null>(null));
-  if(import.meta.hot) (import.meta.hot.data as any).currentCardSignal = pair;
-  return pair;
-})();
+const [currentCard, setCurrentCard] = createRoot(() => createSignal<CardSpec | null>(null));
 
 export {currentCard};
 

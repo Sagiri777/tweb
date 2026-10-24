@@ -11,6 +11,7 @@ import type Chat from '@components/chat/chat';
 import {PAYMENT_REJECTED} from '@components/chat/paidMessagesInterceptor';
 
 import showPriceChangedTooltip from '@components/chat/priceChangedInterceptor/priceChangedTooltip';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 
 type PendingRequest = {
@@ -25,7 +26,7 @@ type ConstructorArgs = {
 };
 
 type OpenedTooltip = {
-  close: () => void;
+  close: () => void; // * assigned right after showPriceChangedTooltip returns
   withStarsAmount: number;
 };
 
@@ -90,11 +91,12 @@ class PriceChangedInterceptor {
   }
 
   private async getAndUpdateStarsAmountIfNecessary(peerId: PeerId) {
-    if(!peerId.isUser()) return this.managers.appPeersManager.getStarsAmount(peerId);
+    const managers = bindManagersToSession(this.managers);
+    if(!peerId.isUser()) return managers.appPeersManager.getStarsAmount(peerId);
 
     const starsAmount = await this.getStarsAmountForUser(peerId.toUserId());
 
-    await this.managers.appUsersManager.updateCachedUserFullStarsAmount(peerId.toUserId(), starsAmount);
+    await managers.appUsersManager.updateCachedUserFullStarsAmount(peerId.toUserId(), starsAmount);
 
     return starsAmount;
   }
@@ -104,10 +106,7 @@ class PriceChangedInterceptor {
       this.closeTooltip();
     }
 
-    if(!this.openedTooltip) this.openedTooltip = {
-      close: this.openTooltip(starsAmount),
-      withStarsAmount: starsAmount
-    }
+    if(!this.openedTooltip) this.openTooltip(starsAmount);
 
     this.pendingRequests.push({
       id: requestId,
@@ -122,28 +121,38 @@ class PriceChangedInterceptor {
       });
     };
 
-    const {close} = showPriceChangedTooltip({
+    const entry: OpenedTooltip = this.openedTooltip = {
+      close: undefined,
+      withStarsAmount: starsAmount
+    };
+
+    const {hide} = showPriceChangedTooltip({
       starsAmount,
-      chat: this.chat,
-      onResend
+      onResend,
+      // the docked toast can go away on its own (peer change, or a newer toast taking
+      // the dock) - drop our reference so the next repay request opens a fresh one
+      onHide: () => {
+        if(this.openedTooltip === entry) this.openedTooltip = undefined;
+      }
     });
 
-    return close;
+    entry.close = hide;
   }
 
   private closeTooltip() {
-    this.openedTooltip?.close();
+    this.openedTooltip?.close?.();
     this.openedTooltip = undefined;
   }
 
   private async confirmResend({pendingRequests}: ConfirmResendArgs) {
+    const managers = bindManagersToSession(this.managers);
     const messageCount = accumulate(pendingRequests.map(r => r.messageCount), 0);
 
     const preparedPaymentResult = await this.chat.input.paidMessageInterceptor.prepareStarsForPayment(messageCount);
 
     if(preparedPaymentResult === PAYMENT_REJECTED) return;
 
-    await Promise.all(pendingRequests.map(({id}) => this.managers.appMessagesManager.confirmRepayRequest(id, preparedPaymentResult)));
+    await Promise.all(pendingRequests.map(({id}) => managers.appMessagesManager.confirmRepayRequest(id, preparedPaymentResult)));
   }
 
   cleanup() {

@@ -3,8 +3,8 @@ import noop from '@helpers/noop';
 import createMiddleware from '@helpers/solid/createMiddleware';
 import {useIsCleaned} from '@hooks/useIsCleaned';
 import {Document, DocumentAttribute} from '@layer';
-import type {AppManagers} from '@lib/managers';
-import RLottiePlayer from '@lib/rlottie/rlottiePlayer';
+import type {ReadingManagers} from '@lib/managers';
+import LottiePlayer from '@lib/lottie/lottiePlayer';
 import {createEffect, createResource, createSignal, untrack} from 'solid-js';
 
 
@@ -17,7 +17,7 @@ function useStickerRenderer(options: {
   onFail?: () => void;
 }) {
   const {container} = options;
-  const [playerToColor, setPlayerToColor] = createSignal<RLottiePlayer>();
+  const [playerToColor, setPlayerToColor] = createSignal<LottiePlayer>();
 
   createEffect(() => {
     playerToColor()?.setColor(options.color(), true);
@@ -57,7 +57,7 @@ function useStickerRenderer(options: {
         if(attribute?.pFlags.text_color) {
           const renderResult = await promise.render.catch(noop);
           if(isCleaned()) return;
-          if(renderResult instanceof RLottiePlayer) setPlayerToColor(renderResult);
+          if(renderResult instanceof LottiePlayer) setPlayerToColor(renderResult);
         }
       } catch{
         if(isCleaned()) return;
@@ -68,7 +68,7 @@ function useStickerRenderer(options: {
 }
 
 export default function EmojiDocumentIcon(props: {
-  managers: AppManagers;
+  managers: ReadingManagers;
   docId: DocId;
   color: string;
   size: number;

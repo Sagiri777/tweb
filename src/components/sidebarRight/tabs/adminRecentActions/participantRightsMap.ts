@@ -18,10 +18,11 @@ export const participantRightsMap: Record<keyof ChatBannedRights.chatBannedRight
   send_roundvideos:  'UserRestrictionsSendRound',
   embed_links:       'UserRestrictionsEmbedLinks',
   send_polls:        'UserRestrictionsSendPolls',
-  edit_rank:         null,
+  edit_rank:         'UserRestrictionsEditRank',
   view_messages:     null,
   send_messages:     null,
   send_games:        null,
   send_inline: null,
-  send_reactions: null
+  send_reactions: null,
+  manage_linked_peers: null
 };

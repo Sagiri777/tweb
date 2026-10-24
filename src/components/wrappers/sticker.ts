@@ -1,4 +1,4 @@
-import type RLottiePlayer from '@lib/rlottie/rlottiePlayer';
+import type LottiePlayer from '@lib/lottie/lottiePlayer';
 import type {ThumbCache} from '@lib/storages/thumbs';
 import type {MyDocument} from '@appManagers/appDocsManager';
 import IS_WEBP_SUPPORTED from '@environment/webpSupport';
@@ -8,6 +8,7 @@ import computeLockColor from '@helpers/computeLockColor';
 import cancelEvent from '@helpers/dom/cancelEvent';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
 import createVideo from '@helpers/dom/createVideo';
+import isDocumentRTL from '@helpers/dom/isDocumentRTL';
 import renderImageFromUrl, {renderImageFromUrlPromise} from '@helpers/dom/renderImageFromUrl';
 import getImageFromStrippedThumb from '@helpers/getImageFromStrippedThumb';
 import getPreviewURLFromThumb from '@helpers/getPreviewURLFromThumb';
@@ -19,10 +20,10 @@ import {isSavingLottiePreview, saveLottiePreview, saveLottiePreviewFromPlayer} f
 import sequentialDom from '@helpers/sequentialDom';
 import {DocumentAttribute, PhotoSize, VideoSize} from '@layer';
 import appDownloadManager from '@lib/appDownloadManager';
-import {AppManagers} from '@lib/managers';
+import {ReadingManagers} from '@lib/managers';
 import choosePhotoSize from '@appManagers/utils/photos/choosePhotoSize';
 import getStickerEffectThumb from '@appManagers/utils/stickers/getStickerEffectThumb';
-import lottieLoader from '@lib/rlottie/lottieLoader';
+import lottieLoader from '@lib/lottie/lottieLoader';
 import rootScope from '@lib/rootScope';
 import webpWorkerController from '@lib/webp/webpWorkerController';
 import {getEmojiToneIndex} from '@vendor/emoji';
@@ -76,13 +77,13 @@ export default async function wrapSticker({doc, div, middleware, loadStickerMidd
   width?: number,
   height?: number,
   withThumb?: boolean,
-  loop?: RLottiePlayer['loop'],
+  loop?: LottiePlayer['loop'],
   loadPromises?: Promise<any>[],
   needFadeIn?: boolean,
   needUpscale?: boolean,
   skipRatio?: number,
   static?: boolean,
-  managers?: AppManagers,
+  managers?: ReadingManagers,
   fullThumb?: PhotoSize | Extract<VideoSize, VideoSize.videoSize>,
   isOut?: boolean,
   noPremium?: boolean,
@@ -132,8 +133,6 @@ export default async function wrapSticker({doc, div, middleware, loadStickerMidd
     lottieLoader.loadLottieWorkers();
   }
 
-  loop = !!(!emoji || isCustomEmoji) && loop;
-
   div.forEach((div) => {
     div.dataset.docId = '' + doc.id;
     if(emoji) {
@@ -169,10 +168,12 @@ export default async function wrapSticker({doc, div, middleware, loadStickerMidd
     if(videoRes.thumb) {
       if(videoRes.thumb.images.thumb) {
         videoRes.thumb.images.thumb.classList.add('media-sticker', 'thumbnail');
+        videoRes.thumb.images.thumb.setAttribute('alt', '');
       }
 
       if(videoRes.thumb.images.full) {
         videoRes.thumb.images.full.classList.add('media-sticker');
+        videoRes.thumb.images.full.setAttribute('alt', '');
       }
     }
 
@@ -189,8 +190,10 @@ export default async function wrapSticker({doc, div, middleware, loadStickerMidd
   const isAnimated = !asStatic && (stickerType === StickerType.Lottie || stickerType === StickerType.WebM);
 
   const effectThumb = getStickerEffectThumb(doc);
-  if(isOut !== undefined && effectThumb && !isOut) {
-    div.forEach((div) => div.classList.add('reflect-x'));
+  if(isOut !== undefined && effectThumb) {
+    // * turned toward the middle of the chat from whichever side the message is on (CSS, so a
+    // * language switched on the fly turns it too)
+    div.forEach((div) => div.classList.add(isOut ? 'reflect-x-at-end' : 'reflect-x-at-start'));
   }
 
   const willHaveLock = effectThumb && withLock;
@@ -392,7 +395,7 @@ export default async function wrapSticker({doc, div, middleware, loadStickerMidd
       };
 
       if(lazyLoadQueue && onlyThumb) {
-        lazyLoadQueue.push({div: div[0], load});
+        lazyLoadQueue.push({div: div[0], load, middleware});
         loadThumbPromise.resolve();
         return ret;
       } else {
@@ -551,6 +554,7 @@ export default async function wrapSticker({doc, div, middleware, loadStickerMidd
         }
 
         media.classList.add('media-sticker');
+        media.setAttribute('alt', '');
         return media;
       });
 
@@ -733,7 +737,7 @@ export default async function wrapSticker({doc, div, middleware, loadStickerMidd
   }
 
   const loadPromise: Promise<Awaited<ReturnType<typeof load>> | void> = lazyLoadQueue && (!downloaded || isAnimated) ?
-    (lazyLoadQueue.push({div: div[0], load}), Promise.resolve()) :
+    (lazyLoadQueue.push({div: div[0], load, middleware}), Promise.resolve()) :
     load();
 
   if(downloaded && (asStatic/*  || stickerType === 3 */)) {
@@ -765,7 +769,7 @@ export async function fireStickerEffect({e, container, doc, managers, middleware
   e: MouseEvent,
   container: HTMLElement,
   doc: MyDocument,
-  managers: AppManagers,
+  managers: ReadingManagers,
   middleware: Middleware,
   isOut: boolean,
   width: number,
@@ -789,10 +793,12 @@ export async function fireStickerEffect({e, container, doc, managers, middleware
   container.dataset.playing = '1';
 
   await loadPromise;
+  // * the effect flies from the message's side of the chat toward the middle; RTL swaps the sides
+  const isOnRight = !!isOut !== isDocumentRTL();
   const {animationDiv, stickerPromise} = wrapStickerAnimation({
     doc,
     middleware,
-    side: isOut ? 'right' : 'left',
+    side: isOnRight ? 'right' : 'left',
     size: width * STICKER_EFFECT_MULTIPLIER,
     target: container,
     play: true,
@@ -802,7 +808,7 @@ export async function fireStickerEffect({e, container, doc, managers, middleware
     scrollable
   });
 
-  if(isOut !== undefined && !isOut/*  && !relativeEffect */) {
+  if(isOut !== undefined && !isOnRight/*  && !relativeEffect */) {
     animationDiv.classList.add('reflect-x');
   }
 
@@ -832,7 +838,7 @@ export function StickerTsx(props: {
   autoStyle?: boolean
   class?: string
   extraOptions?: StickerTsxExtraOptions
-  onRender?: (player: RLottiePlayer | HTMLVideoElement[] | HTMLImageElement[]) => void
+  onRender?: (player: LottiePlayer | HTMLVideoElement[] | HTMLImageElement[]) => void
 }) {
   const div = document.createElement('div');
   props.class && div.classList.add(props.class);

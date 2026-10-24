@@ -1,5 +1,4 @@
 import AppSelectPeers from '@components/appSelectPeers';
-import PopupElement from '@components/popups';
 import showLimitPopup from '@components/popups/limit';
 import {wrapFormattedDuration} from '@components/wrappers/wrapDuration';
 import deferredPromise from '@helpers/cancellablePromise';
@@ -8,6 +7,7 @@ import {getMiddleware} from '@helpers/middleware';
 import tsNow from '@helpers/tsNow';
 import {i18n} from '@lib/langPack';
 import rootScope from '@lib/rootScope';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 /**
  * expect chat migration
@@ -30,14 +30,13 @@ export async function showChannelsTooMuchPopup() {
   const deferred = deferredPromise<void>();
   showLimitPopup('channels', async(popup) => {
     const middlewareHelper = getMiddleware();
-    popup.addEventListener('closeAfterTimeout', () => {
+    popup.onCloseAfterTimeout(() => {
       deferred.reject();
       middlewareHelper.destroy();
     });
     const datesMap = new Map<PeerId, number>();
     const selector = new AppSelectPeers({
       middleware: middlewareHelper.get(),
-      // @ts-ignore
       appendTo: popup.body,
       onChange: (value) => {
         if(!value) {
@@ -46,9 +45,10 @@ export async function showChannelsTooMuchPopup() {
         } else if(value) {
           mainButton.element.replaceChildren(i18n('LeaveCommunities', [value]));
           mainButton.callback = async() => {
+            const managers = bindManagersToSession(rootScope.managers);
             const peerIds = selector.getSelected();
             for(const peerId of peerIds) {
-              await rootScope.managers.appChatsManager.leave(peerId.toChatId());
+              await managers.appChatsManager.leave(peerId.toChatId());
             }
             deferred.resolve();
           };
@@ -87,7 +87,6 @@ export async function showChannelsTooMuchPopup() {
 
     selector.renderResultsFunc(peerIds);
 
-    // @ts-ignore
     const mainButton = popup.buttons[0];
     const mainButtonChildren = [...mainButton.element.children];
     const mainButtonCallback = mainButton.callback;

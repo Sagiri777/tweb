@@ -1,14 +1,16 @@
 import {createEffect, createSignal, For, JSX, createMemo, onCleanup, untrack, createReaction, Show, Switch, Match} from 'solid-js';
 import {getOverlayRoot} from '@helpers/appWindow';
 import {Portal} from 'solid-js/web';
-import {createStoriesViewer, createStoriesViewerWithPeer} from '@components/stories/viewer';
 import {Document, MessageMedia, Photo, StoryItem} from '@layer';
 import {wrapStoryMedia} from '@components/stories/preview';
 import getMediaThumbIfNeeded from '@helpers/getStrippedThumbIfNeeded';
 import {StoriesContext, useStories, createStoriesStore, StoriesContextState} from '@components/stories/store';
 import Icon from '@components/icon';
 import {ChipTab, ChipTabs} from '@components/chipTabs';
-import {i18n} from '@lib/langPack';
+import I18n, {i18n} from '@lib/langPack';
+import buttonKeyDown from '@helpers/solid/buttonKeyDown';
+import Modes from '@config/modes';
+import {formatFullSentTime} from '@helpers/date';
 import wrapEmojiText from '@lib/richTextProcessor/wrapEmojiText';
 import {PreloaderTsx} from '@components/putPreloader';
 import fastSmoothScroll from '@helpers/fastSmoothScroll';
@@ -29,21 +31,22 @@ import ListenerSetter from '@helpers/listenerSetter';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
 import cancelClickOrNextIfNotClick from '@helpers/dom/cancelClickOrNextIfNotClick';
 import {ButtonMenuItemOptionsVerifiable} from '@components/buttonMenu';
-import {AppMyStoriesTab} from '@components/solidJsTabs/tabs';
 import SidebarSlider from '../slider';
 import InputField from '@components/inputField';
 import confirmationPopup from '@components/confirmationPopup';
-import PopupElement from '@components/popups';
-import PopupChooseStory from '@components/popups/chooseStoryPopup';
+import showChooseStoryPopup from '@components/popups/chooseStoryPopup';
 import createSubmenuTrigger from '@components/createSubmenuTrigger';
 import showStoriesStealthModePopup from '@components/popups/storiesStealthMode';
 import {toastNew} from '@components/toast';
 import {IconTsx} from '@components/iconTsx';
 import LottieAnimation from '@components/lottieAnimation';
-import lottieLoader from '@lib/rlottie/lottieLoader';
+import Tabs from '@components/tabs';
+import lottieLoader from '@lib/lottie/lottieLoader';
 import {copyTextToClipboard} from '@helpers/clipboard';
 import {handleShareStory} from './share';
 import wrapPeerTitle from '../wrappers/peerTitle';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 const ALL_ALBUMS_ID = -1;
 const ADD_ALBUM_ID = -2;
@@ -119,7 +122,7 @@ class StoriesContextMenu {
   }
 
   private init() {
-    const managers = rootScope.managers;
+    const managers = bindManagersToSession(rootScope.managers);
     const getSelectedIds = () => {
       if(this.selection && this.selection.isSelecting) {
         return this.selection.getSelectedStoryIds(this.peerId);
@@ -245,14 +248,14 @@ class StoriesContextMenu {
         return !!story.pFlags.public && (!story.pFlags.noforwards || !!username)
       }
     }, {
-      icon: 'eyecross_outline',
+      icon: 'eyecross',
       text: 'Stories.StealthMode.View',
       onClick: () => {
         const {peerId} = this;
         const id = this.storyItem.id;
         showStoriesStealthModePopup({
           onActivate: () => {
-            createStoriesViewerWithPeer({peerId, id});
+            hotReloadGuard.createStoriesViewerWithPeer({peerId, id});
           }
         });
       },
@@ -284,6 +287,7 @@ class StoriesContextMenu {
 }
 
 async function openCreateAlbumPopup(peerId: PeerId): Promise<number | undefined> {
+  const managers = bindManagersToSession(rootScope.managers);
   const inputField = new InputField({
     maxLength: 64,
     placeholder: 'Stories.Albums.CreatePlaceholder',
@@ -300,7 +304,7 @@ async function openCreateAlbumPopup(peerId: PeerId): Promise<number | undefined>
     return;
   }
 
-  const album = await rootScope.managers.appStoriesManager.createAlbum(peerId, inputField.value);
+  const album = await managers.appStoriesManager.createAlbum(peerId, inputField.value);
   return album.album_id;
 }
 
@@ -366,6 +370,7 @@ function StoriesAlbums(props: {
               text: 'Stories.Albums.Rename',
               verify: () => stories.canEdit,
               onClick: async() => {
+                const managers = bindManagersToSession(rootScope.managers);
                 const inputField = new InputField({
                   maxLength: 64,
                   placeholder: 'Stories.Albums.CreatePlaceholder',
@@ -384,7 +389,7 @@ function StoriesAlbums(props: {
                 }
 
                 if(inputField.value === album.title) return;
-                rootScope.managers.appStoriesManager.updateAlbum(props.peerId, id, {title: inputField.value}).catch(() => {
+                managers.appStoriesManager.updateAlbum(props.peerId, id, {title: inputField.value}).catch(() => {
                   toastNew({langPackKey: 'Error.AnError'});
                 });
               }
@@ -395,6 +400,7 @@ function StoriesAlbums(props: {
               verify: () => stories.canEdit,
               danger: true,
               onClick: async() => {
+                const managers = bindManagersToSession(rootScope.managers);
                 try {
                   await confirmationPopup({
                     titleLangKey: 'Stories.Albums.Delete',
@@ -405,7 +411,7 @@ function StoriesAlbums(props: {
                   return;
                 }
 
-                rootScope.managers.appStoriesManager.deleteAlbum(props.peerId, id).catch(() => {
+                managers.appStoriesManager.deleteAlbum(props.peerId, id).catch(() => {
                   toastNew({langPackKey: 'Error.AnError'});
                 });
               }
@@ -437,17 +443,15 @@ function StoriesAlbums(props: {
 }
 
 async function openAddToAlbumPopup(peerId: PeerId, albumId: number) {
-  const popup = PopupElement.createPopup(PopupChooseStory, {peerId, albumId});
-  popup.show();
-
+  const managers = bindManagersToSession(rootScope.managers);
   const result = await new Promise<{added: number[], removed: number[]} | null>((resolve) => {
-    popup.addEventListener('finish', resolve);
+    showChooseStoryPopup({peerId, albumId, onFinish: resolve});
   });
 
   if(!result) return;
   const {added, removed} = result;
   if(!added.length && !removed.length) return;
-  rootScope.managers.appStoriesManager.updateAlbum(peerId, albumId, {
+  managers.appStoriesManager.updateAlbum(peerId, albumId, {
     addStories: added.length ? added : undefined,
     deleteStories: removed.length ? removed : undefined
   }).catch(() => {
@@ -493,7 +497,7 @@ function StoriesGrid(props: {
       actions.set({peer, index});
     });
 
-    createStoriesViewer({
+    hotReloadGuard.createStoriesViewer({
       onExit,
       target,
       splitByDays: true
@@ -510,7 +514,12 @@ function StoriesGrid(props: {
         // @ts-ignore
         'data-mid': storyItem.id,
         'data-peer-id': stories.peer.peerId,
+        'data-timestamp': (storyItem as StoryItem.storyItem).date,
         'class': 'grid-item search-super-item',
+        'role': 'button',
+        'tabindex': Modes.a11y ? 0 : undefined,
+        'aria-label': `${I18n.format('OpenStory', true)}, ${formatFullSentTime((storyItem as StoryItem.storyItem).date).textContent}`,
+        'onKeyDown': buttonKeyDown,
         'onClick': () => {
           setViewerId(storyItem.id);
         }
@@ -544,24 +553,27 @@ function StoriesGrid(props: {
           ignoreCache: true,
           onlyStripped: true
         });
-        const thumb = gotThumb.image as HTMLCanvasElement;
-        element.parentElement.prepend(thumb);
+        if(gotThumb && element.parentElement) {
+          const thumb = gotThumb.image as HTMLCanvasElement;
+          element.parentElement.prepend(thumb);
 
-        // need img for clone animation to work
-        gotThumb.loadPromise.then(() => {
-          const img = document.createElement('img');
-          img.className = thumb.className;
-          img.src = thumb.toDataURL();
-          thumb.replaceWith(img);
-        });
+          // need img for clone animation to work
+          gotThumb.loadPromise.then(() => {
+            const img = document.createElement('img');
+            img.alt = '';
+            img.className = thumb.className;
+            img.src = thumb.toDataURL();
+            thumb.replaceWith(img);
+          });
 
-        onCleanup(() => {
-          thumb.remove();
-        });
+          onCleanup(() => {
+            thumb.remove();
+          });
+        }
       }
 
       if(element.parentElement && props.pinned && !stories.albumId && (storyItem as StoryItem.storyItem).pinnedIndex !== undefined) {
-        icon ??= Icon('pin2', 'grid-item-pin');
+        icon ??= Icon('pin2_filled', 'grid-item-pin');
         element.parentElement.append(icon);
       } else if(icon) {
         icon.remove();
@@ -592,7 +604,8 @@ function StoriesGrid(props: {
   let scrollDiff = 0;
 
   const slideKeyframes = (_element: Element, removed: boolean): Keyframe[] => {
-    const dir = direction();
+    // * the album chips run the other way in RTL, and the albums slide in from the side of theirs
+    const dir = direction() * (I18n.getIsRTL() ? -1 : 1);
     const yOffset = scrollDiff ? ` translateY(${scrollDiff}px)` : '';
     if(removed) {
       // AnimationList reverses these for exit; Y offset compensates scroll change
@@ -723,6 +736,7 @@ function StoriesSelectionToolbar(props: {
       <ButtonTsx
         icon="close"
         class="search-super-selection-cancel btn-icon"
+        aria-label={I18n.format('Close', true)}
         onClick={() => props.selection.cancelSelection()}
       />
       <div class="search-super-selection-count">
@@ -732,6 +746,7 @@ function StoriesSelectionToolbar(props: {
         <ButtonTsx
           icon="crossround"
           class="search-super-selection-remove btn-icon"
+          aria-label={I18n.format('Stories.Albums.RemoveFromAlbum', true)}
           onClick={() => {
             const mids = props.selection.selectedMids.get(props.peerId);
             if(mids?.size) {
@@ -750,6 +765,7 @@ function StoriesSelectionToolbar(props: {
         <ButtonTsx
           icon="pin"
           class="search-super-selection-pintotop btn-icon"
+          aria-label={I18n.format('PinMessage', true)}
           onClick={() => props.selection.onPinStoriesToTopClick(undefined, true)}
         />
       </Show>
@@ -757,6 +773,7 @@ function StoriesSelectionToolbar(props: {
         <ButtonTsx
           icon={props.selection.isStoriesArchive ? 'unarchive' : 'archive'}
           class="search-super-selection-pin btn-icon"
+          aria-label={I18n.format(props.selection.isStoriesArchive ? 'Unarchive' : 'Archive', true)}
           onClick={() => props.selection.onPinStoriesClick(undefined, props.selection.isStoriesArchive)}
         />
       </Show>
@@ -764,6 +781,7 @@ function StoriesSelectionToolbar(props: {
         <ButtonTsx
           icon="delete"
           class="search-super-selection-delete btn-icon danger"
+          aria-label={I18n.format('Delete', true)}
           onClick={() => props.selection.onDeleteStoriesClick()}
         />
       </Show>
@@ -779,13 +797,14 @@ function StoriesSelectionToolbar(props: {
     return <Portal mount={props.mount}>{content}</Portal>;
   }
 
+  // with nowhere to mount into, the toolbar brings the plate the search tabs would have sat on
   return (
-    <div
-      class="search-super-tabs-scrollable menu-horizontal-scrollable sticky is-single"
+    <Tabs.MenuShell
+      class="search-super-tabs-scrollable sticky is-single"
       classList={{'is-selecting': props.selection.selecting(), 'backwards': !props.selection.selecting()}}
     >
       {content}
-    </div>
+    </Tabs.MenuShell>
   );
 }
 
@@ -801,8 +820,8 @@ export function profileStoriesButtonMenu(props: {
     icon: 'archive',
     text: 'MyStories.ShowArchive',
     onClick: () => {
-      props.slider.createTab(AppMyStoriesTab).open({
-        ...AppMyStoriesTab.getInitArgs(),
+      props.slider.createTab(hotReloadGuard.tabs.AppMyStoriesTab).open({
+        ...hotReloadGuard.tabs.AppMyStoriesTab.getInitArgs(),
         isArchive: true,
         chatId: props.peerId.isAnyChat() ? props.peerId.toChatId() : undefined
       });
@@ -861,7 +880,7 @@ export function StoriesProfileList(props: {
 
   const selection = props.withSelection ? new StoriesSelection({
     container: props.scrollable.container,
-    managers: rootScope.managers,
+    managers: bindManagersToSession(rootScope.managers),
     listenerSetter: props.listenerSetter,
     isArchive: props.archive,
     chatId: props.peerId.isAnyChat() ? props.peerId.toChatId() : undefined,
@@ -896,7 +915,7 @@ export function StoriesProfileList(props: {
                 if(selection.isSelecting) {
                   const item = findUpClassName(e.target, 'search-super-item');
                   if(!item) return;
-                  cancelClickOrNextIfNotClick(e);
+                  selection.cancelElementClick(e, item, cancelClickOrNextIfNotClick);
                   selection.toggleByElement(item);
                 }
               }, {capture: true, passive: false, listenerSetter: props.listenerSetter});

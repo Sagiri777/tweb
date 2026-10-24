@@ -4,21 +4,21 @@ import findAndSplice from '@helpers/array/findAndSplice';
 import cancelEvent from '@helpers/dom/cancelEvent';
 import {attachClickEvent, simulateClickEvent} from '@helpers/dom/clickEvent';
 import filterChatPhotosMessages from '@helpers/filterChatPhotosMessages';
+import getChatPhotosCount from '@helpers/getChatPhotosCount';
 import ListenerSetter from '@helpers/listenerSetter';
 import ListLoader from '@helpers/listLoader';
 import {getMiddleware, MiddlewareHelper} from '@helpers/middleware';
 import {makeMediaSize} from '@helpers/mediaSize';
 import {fastRaf} from '@helpers/schedulers';
 import {Message, ChatFull, MessageAction, Photo, User, ChatPhoto, UserFull} from '@layer';
-import {AppManagers} from '@lib/managers';
+import {ReadingManagers} from '@lib/managers';
 import rootScope from '@lib/rootScope';
 import choosePhotoSize from '@appManagers/utils/photos/choosePhotoSize';
 import {avatarNew, wrapPhotoToAvatar} from '@components/avatarNew';
-import animationIntersector from '@components/animationIntersector';
 import Scrollable from '@components/scrollable';
 import SwipeHandler from '@components/swipeHandler';
 import wrapPhoto from '@components/wrappers/photo';
-import openAvatarViewer from '@components/openAvatarViewer';
+import openAvatarViewer from '@components/mediaViewer/openAvatarViewer';
 import Icon from '@components/icon';
 import apiManagerProxy from '@lib/apiManagerProxy';
 import {createEffect, createRoot, on} from 'solid-js';
@@ -34,9 +34,17 @@ import {getOverlayRoot} from '@helpers/appWindow';
 import {changeTitleEmojiColor} from '@components/peerTitle';
 import ProgressivePreloader from '@components/preloader';
 import {avatarUploads} from '@stores/avatarUpload';
+import Button from '@components/button';
+import Modes from '@config/modes';
+import isDocumentRTL from '@helpers/dom/isDocumentRTL';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 const LOAD_NEAREST = 3;
 export const SHOW_NO_AVATAR = true;
+
+const getPhotoFromAvatarMessage = (message: Message.messageService) => {
+  return (message.action as MessageAction.messageActionChannelEditPhoto).photo as Photo.photo;
+};
 
 export default class PeerProfileAvatars {
   private static BASE_CLASS = 'profile-avatars';
@@ -67,6 +75,7 @@ export default class PeerProfileAvatars {
   private fold: () => void;
   private uploadInProgress: boolean;
   private uploadPreloader: ProgressivePreloader;
+  private photosByElement = new WeakMap<HTMLElement, Photo.photo>();
   // The public (fallback) photo, appended at the END of the carousel on the
   // self profile. Resolved id + a once-guard so it's added on exactly one page.
   private fallbackPhotoId: Photo.photo['id'];
@@ -75,7 +84,7 @@ export default class PeerProfileAvatars {
 
   constructor(
     private scrollable: Scrollable,
-    private managers: AppManagers,
+    private managers: ReadingManagers,
     private setCollapsedOn: HTMLElement
   ) {
     this.container = document.createElement('div');
@@ -96,13 +105,14 @@ export default class PeerProfileAvatars {
     this.tabs = document.createElement('div');
     this.tabs.classList.add(PeerProfileAvatars.BASE_CLASS + '-tabs');
 
-    this.arrowPrevious = document.createElement('div');
+    // native buttons only with the keyboard layer: they take the focus on click
+    this.arrowPrevious = Button('', {noRipple: true, ariaLabel: 'KeyboardShortcuts.Action.PreviousMedia', asDiv: !Modes.a11y});
     this.arrowPrevious.classList.add(PeerProfileAvatars.BASE_CLASS + '-arrow');
     this.arrowPrevious.append(Icon('avatarprevious', PeerProfileAvatars.BASE_CLASS + '-arrow-icon'));
 
     this.middlewareHelper = getMiddleware();
 
-    this.arrowNext = document.createElement('div');
+    this.arrowNext = Button('', {noRipple: true, ariaLabel: 'KeyboardShortcuts.Action.NextMedia', asDiv: !Modes.a11y});
     this.arrowNext.classList.add(PeerProfileAvatars.BASE_CLASS + '-arrow', PeerProfileAvatars.BASE_CLASS + '-arrow-next');
     this.arrowNext.append(Icon('avatarnext', PeerProfileAvatars.BASE_CLASS + '-arrow-icon'));
 
@@ -139,11 +149,19 @@ export default class PeerProfileAvatars {
     const SWITCH_ZONE = 1 / 3;
     let cancel = false;
     let freeze = false;
+    // The info overlay (name + subtitle) is pointer-events: none, so an event
+    // can only reach one of its descendants when that descendant opted back in
+    // — i.e. it is an interactive control (emoji status, stars rating, the
+    // topic's forum button, "show when") and owns the click. The header must
+    // not also fold/unfold, nor run checkScrollTop below, which would yank a
+    // scrolled profile back to the top. Deriving that from the overlay beats
+    // listing the classes: the list and the CSS opt-ins drifted apart twice.
+    // The overlay ITSELF is never a target while it stays pointer-events: none
+    // — excluding it only keeps that from silently turning the whole strip
+    // click-through for the header should the rule ever be relaxed.
     attachClickEvent(this.container, async(_e) => {
-      if(
-        findUpClassName(_e.target, 'profile-subtitle-rating') ||
-        findUpClassName(_e.target, 'emoji-status')
-      ) {
+      const {target} = _e;
+      if(target !== this.info && this.info.contains(target as Node)) {
         return;
       }
 
@@ -186,7 +204,13 @@ export default class PeerProfileAvatars {
 
       // const e = (_e as TouchEvent).touches ? (_e as TouchEvent).touches[0] : _e as MouseEvent;
       const e = _e;
-      const x = e.pageX;
+      // A native keyboard click has no pointer coordinates. The arrows still
+      // enter the same paging path as pointer clicks, including wraparound.
+      // * the photos page in reading order: the next one is at the inline end, on the left in RTL
+      const rtl = isDocumentRTL();
+      const arrow = (e.target as HTMLElement).closest('.' + PeerProfileAvatars.BASE_CLASS + '-arrow');
+      const x = arrow ?
+        ((arrow === this.arrowNext) !== rtl ? rect.right : rect.left) : e.pageX;
 
       const clickX = x - rect.left;
       if((!this.listLoader.previous.length && !this.listLoader.next.length) ||
@@ -209,24 +233,30 @@ export default class PeerProfileAvatars {
         .filter((target) => target.item !== this.fallbackPhotoId);
 
         const target = this.avatars.children[this.listLoader.previous.length] as HTMLElement;
+        const currentItem = this.listLoader.current;
+        const currentPhoto = typeof(currentItem) === 'object' ?
+          getPhotoFromAvatarMessage(currentItem) :
+          this.photosByElement.get(target);
         freeze = true;
         openAvatarViewer(
           target,
           peerId,
           () => peerId === this.peerId,
-          this.listLoader.current as Message.messageService,
+          currentItem,
           prevTargets,
-          nextTargets
+          nextTargets,
+          currentPhoto,
+          this.fallbackPhotoId
         );
         freeze = false;
       } else {
         const centerX = rect.right - (rect.width / 2);
-        const toRight = x > centerX;
+        const toNext = (x > centerX) !== rtl;
 
         let distance: number;
-        if(this.listLoader.index === 0 && !toRight) distance = this.listLoader.count - 1;
-        else if(this.listLoader.index === (this.listLoader.count - 1) && toRight) distance = -(this.listLoader.count - 1);
-        else distance = toRight ? 1 : -1;
+        if(this.listLoader.index === 0 && !toNext) distance = this.listLoader.count - 1;
+        else if(this.listLoader.index === (this.listLoader.count - 1) && toNext) distance = -(this.listLoader.count - 1);
+        else distance = toNext ? 1 : -1;
 
         this.goWithoutTransition(distance);
       }
@@ -239,11 +269,13 @@ export default class PeerProfileAvatars {
       }, {once: true});
     };
 
-    let width = 0, x = 0, lastDiffX = 0, /* lastIndex = 0, */ minX = 0;
+    // * `x` and `lastDiffX` run along the line: a positive `lastDiffX` goes on to the next photo, and
+    // * `reflect` turns them into the physical offset, which in RTL brings the strip in from the left
+    let width = 0, x = 0, lastDiffX = 0, /* lastIndex = 0, */ minX = 0, reflect = 1;
     const swipeHandler = this.swipeHandler = new SwipeHandler({
       element: this.avatars,
       onSwipe: (xDiff, yDiff) => {
-        xDiff *= -1;
+        xDiff *= -reflect;
         yDiff *= -1;
 
         lastDiffX = xDiff;
@@ -251,7 +283,7 @@ export default class PeerProfileAvatars {
         if(lastX > 0) lastX = 0;
         else if(lastX < minX) lastX = minX;
 
-        this.avatars.style.transform = PeerProfileAvatars.TRANSLATE_TEMPLATE.replace('{x}', lastX + 'px');
+        this.avatars.style.transform = PeerProfileAvatars.TRANSLATE_TEMPLATE.replace('{x}', lastX * reflect + 'px');
         // console.log(xDiff, yDiff);
         return false;
       },
@@ -272,12 +304,13 @@ export default class PeerProfileAvatars {
         const rect = this.avatars.getBoundingClientRect();
         width = rect.width;
         minX = -width * (this.tabs.childElementCount - 1);
+        reflect = isDocumentRTL() ? -1 : 1;
 
         /* lastIndex = whichChild(this.tabs.querySelector('.active'));
         x = -width * lastIndex; */
-        x = rect.left - this.container.getBoundingClientRect().left;
+        x = (rect.left - this.container.getBoundingClientRect().left) * reflect;
 
-        this.avatars.style.transform = PeerProfileAvatars.TRANSLATE_TEMPLATE.replace('{x}', x + 'px');
+        this.avatars.style.transform = PeerProfileAvatars.TRANSLATE_TEMPLATE.replace('{x}', x * reflect + 'px');
 
         this.container.classList.add('is-swiping');
         this.avatars.classList.add('no-transition');
@@ -374,13 +407,14 @@ export default class PeerProfileAvatars {
   }
 
   public async setPeer(peerId: PeerId, threadId?: number) {
+    const managers = bindManagersToSession(this.managers);
     this.peerId = peerId;
     this.threadId = threadId;
     this.middlewareHelper.clean();
 
     // A topic isn't backed by its own photo history — render the topic icon as a
     // single, collapse-locked avatar, exactly like a chat with no avatar photo.
-    const photo = threadId ? undefined : await this.managers.appPeersManager.getPeerPhoto(peerId);
+    const photo = threadId ? undefined : await managers.appPeersManager.getPeerPhoto(peerId);
     if(!photo && !SHOW_NO_AVATAR) {
       return;
     }
@@ -425,7 +459,7 @@ export default class PeerProfileAvatars {
     this.fallbackPhotoId = undefined;
     this.fallbackAppended = false;
     if(peerId === rootScope.myId && peerId.isUser() && !this.hasNoPhoto) {
-      const userFull = await this.managers.appProfileManager.getProfile(peerId.toUserId());
+      const userFull = await managers.appProfileManager.getProfile(peerId.toUserId());
       const fallback = (userFull as UserFull.userFull)?.fallback_photo as Photo.photo;
       if(fallback?._ === 'photo') this.fallbackPhotoId = fallback.id;
     }
@@ -437,7 +471,7 @@ export default class PeerProfileAvatars {
 
         if(peerId.isUser()) {
           const maxId: Photo.photo['id'] = anchor as any;
-          return this.managers.appPhotosManager.getUserPhotos(peerId, maxId, loadCount).then((value) => {
+          return managers.appPhotosManager.getUserPhotos(peerId, maxId, loadCount).then((value) => {
             const items = value.photos.slice();
             let count = value.count;
             if(this.fallbackPhotoId) {
@@ -455,10 +489,10 @@ export default class PeerProfileAvatars {
         } else {
           const promises: [Promise<ChatFull> | ChatFull, ReturnType<AppMessagesManager['getHistory']>] = [] as any;
           if(!listLoader.current) {
-            promises.push(this.managers.appProfileManager.getChatFull(peerId.toChatId()));
+            promises.push(managers.appProfileManager.getChatFull(peerId.toChatId()));
           }
 
-          promises.push(this.managers.appMessagesManager.getHistory({
+          promises.push(managers.appMessagesManager.getHistory({
             peerId,
             offsetId: Number.MAX_SAFE_INTEGER,
             inputFilter: {
@@ -478,6 +512,7 @@ export default class PeerProfileAvatars {
 
             filterChatPhotosMessages(value);
 
+            let count = value.count;
             if(!listLoader.current) {
               const chatFull = result[0];
               const chatPhoto = chatFull?.chat_photo;
@@ -485,12 +520,13 @@ export default class PeerProfileAvatars {
                 return ((message as Message.messageService).action as MessageAction.messageActionChannelEditPhoto).photo.id === chatPhoto?.id;
               }) as Message.messageService;
 
-              listLoader.current = message || (chatPhoto && await this.managers.appMessagesManager.generateFakeAvatarMessage(this.peerId, chatPhoto));
+              const current = listLoader.current = message || (chatPhoto && await managers.appMessagesManager.generateFakeAvatarMessage(this.peerId, chatPhoto));
+              count = getChatPhotosCount(value.count, messages.length, !message && !!current);
             }
 
             // console.log('avatars loaded:', value);
             return {
-              count: value.count,
+              count,
               items: messages
             };
           });
@@ -501,7 +537,7 @@ export default class PeerProfileAvatars {
         const id = this.listLoader.index;
         // const nextId = Math.max(0, id);
         const x = 100 * PeerProfileAvatars.SCALE * id;
-        this.avatars.style.transform = PeerProfileAvatars.TRANSLATE_TEMPLATE.replace('{x}', `-${x}%`);
+        this.avatars.style.transform = PeerProfileAvatars.TRANSLATE_TEMPLATE.replace('{x}', `calc(-${x}% * var(--reflect))`);
 
         [this.tabs, this.avatars].forEach((container) => {
           const activeTab = container.querySelector('.active');
@@ -816,7 +852,10 @@ export default class PeerProfileAvatars {
     if(photoId) {
       photo = typeof(photoId) !== 'object' ?
         await this.managers.appPhotosManager.getPhoto(photoId) :
-        (photoId.action as MessageAction.messageActionChannelEditPhoto).photo as Photo.photo;
+        getPhotoFromAvatarMessage(photoId);
+    }
+    if(photo) {
+      this.photosByElement.set(avatar, photo);
     }
 
     const isTopic = !!this.threadId;
@@ -956,16 +995,6 @@ export default class PeerProfileAvatars {
 
   public cleanup() {
     cancelAnimationFrame(this.videoProgressRAF);
-    // Release the avatar videos we registered with the intersector. While the
-    // right sidebar was closed, toggleVideosUnder may have LOCKED them, and a
-    // locked item is NOT auto-removed when it leaves the DOM (checkAnimation
-    // early-returns on locked) — so unregister + free the decoder explicitly.
-    this.container.querySelectorAll<HTMLVideoElement>('video.avatar-video').forEach((video) => {
-      animationIntersector.removeAnimationByPlayer(video);
-      video.pause();
-      video.src = '';
-      video.load();
-    });
     this.listenerSetter.removeAll();
     this.swipeHandler.removeListeners();
     this.intersectionObserver?.disconnect();

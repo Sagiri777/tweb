@@ -11,7 +11,7 @@ import RangeSelector from '@components/rangeSelector';
 const className = 'player-volume';
 
 export default class VolumeSelector extends RangeSelector {
-  private static ICONS: Icon[] = ['volume_off', 'volume_mute', 'volume_down', 'volume_up'];
+  private static ICONS: Icon[] = ['volume_off_filled', 'volume_mute_filled', 'volume_down_filled', 'volume_up_filled'];
   public btn: HTMLElement;
   protected icon: HTMLSpanElement;
   protected listenerSetter: ListenerSetter;
@@ -27,13 +27,17 @@ export default class VolumeSelector extends RangeSelector {
     vertical?: boolean,
     media?: HTMLMediaElement,
     maxVolume?: number,
-    onVolumeChange?: VolumeSelector['onVolumeChange']
+    onVolumeChange?: VolumeSelector['onVolumeChange'],
+    /** Inside a player's controls, which run left to right in any language */
+    keepLTR?: boolean
   }) {
     super({
+      ariaLabel: 'AccDescr.Volume',
       step: 0.01,
       min: 0,
       max: options.maxVolume ?? 1,
-      vertical: options.vertical
+      vertical: options.vertical,
+      keepLTR: options.keepLTR
     }, 1);
 
     safeAssign(this, options);

@@ -42,7 +42,7 @@ const thumbUpdateDebounceTimeout = 100;
 const testEmpty = 0;
 
 const AdminRecentActionsTab = () => {
-  const {rootScope, PeerTitleTsx, apiManagerProxy, appImManager, ChatType} = useHotReloadGuard();
+  const {rootScope, PeerTitleTsx, apiManagerProxy, appImManager, ChatType, I18n} = useHotReloadGuard();
   const [tab] = useSuperTab<typeof AppAdminRecentActionsTab>();
 
   const isForum = apiManagerProxy.isForum(tab.payload.channelId.toPeerId(true));
@@ -172,10 +172,10 @@ const AdminRecentActionsTab = () => {
         </Transition>
         <Transition name='fade' mode='outin'>
           <Show when={logs().length || committedFilters()}>
-            <ButtonIconTsx icon='filter' onClick={() => setIsFiltersOpen(!isFiltersOpen())} />
+            <ButtonIconTsx icon='filter' aria-label={I18n.format('AdminRecentActionsFilters.ByType', true)} onClick={() => setIsFiltersOpen(!isFiltersOpen())} />
           </Show>
         </Transition>
-        <ButtonIconTsx icon='message' onClick={onChatView} />
+        <ButtonIconTsx icon='message' aria-label={I18n.format('SavedViewAsMessages', true)} onClick={onChatView} />
       </div>
     </Portal>
     <Portal mount={tab.content}>
@@ -232,9 +232,10 @@ const AdminRecentActionsTab = () => {
 
             if(shouldAnimateIn && areAnimationsAvailable) {
               onMount(() => {
+                // reduced animations: the entries fade in where they stand
                 ref?.animate({
                   opacity: [0, 1],
-                  transform: ['translateY(-4px)', 'translateY(0)']
+                  ...(liteMode.isAvailable('motion') && {transform: ['translateY(-4px)', 'translateY(0)']})
                 }, {
                   duration: animateInDuration,
                   delay: props.idx * (cachedAreAllExpanded() ? staggerDelayExpanded : staggerDelay) + (!isFirstAnimation ? reAnimateDelay : 0)

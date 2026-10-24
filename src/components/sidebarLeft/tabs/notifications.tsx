@@ -6,6 +6,8 @@ import {InputNotifyPeer, InputPeerNotifySettings, PeerNotifySettings, ReactionNo
 import {i18n, LangPackKey} from '@lib/langPack';
 import {MUTE_UNTIL} from '@appManagers/constants';
 import rootScope from '@lib/rootScope';
+import {createProxiedManagersForAccount} from '@lib/getProxiedManagers';
+import {getCurrentAccount} from '@lib/accounts/getCurrentAccount';
 import {useAppSettings} from '@stores/appSettings';
 import CheckboxFieldTsx from '@components/checkboxFieldTsx';
 import RangeSettingSelector from '@components/rangeSettingSelector';
@@ -16,8 +18,12 @@ import {toastNew} from '@components/toast';
 import Button from '@components/buttonTsx';
 import cancelEvent from '@helpers/dom/cancelEvent';
 import {useHotReloadGuard} from '@lib/solidjs/hotReloadGuard';
+import IS_NOTIFICATION_SUPPORTED from '@environment/notificationSupport';
 
-type InputNotifyKey = Exclude<InputNotifyPeer['_'], 'inputNotifyPeer' | 'inputNotifyForumTopic'>;
+type InputNotifyKey =
+  InputNotifyPeer.inputNotifyUsers['_'] |
+  InputNotifyPeer.inputNotifyChats['_'] |
+  InputNotifyPeer.inputNotifyBroadcasts['_'];
 
 const NotifySection = (props: {
   name: LangPackKey,
@@ -43,10 +49,12 @@ const NotifySection = (props: {
   });
 
   onCleanup(async() => {
+    // * the account the tab was open on: an account switch can come before the answer below
+    const managers = createProxiedManagersForAccount(getCurrentAccount());
     const mute = !enabled();
     const _showPreviews = showPreviews();
     const _notifySettings = notifySettings();
-    const isMuted = await rootScope.managers.appNotificationsManager.isMuted(_notifySettings);
+    const isMuted = await managers.appNotificationsManager.isMuted(_notifySettings);
     if(
       mute === isMuted &&
       _showPreviews === _notifySettings.show_previews
@@ -58,7 +66,7 @@ const NotifySection = (props: {
     inputSettings._ = 'inputPeerNotifySettings';
     inputSettings.mute_until = mute ? MUTE_UNTIL : 0;
     inputSettings.show_previews = _showPreviews;
-    rootScope.managers.appNotificationsManager.updateNotifySettings(
+    managers.appNotificationsManager.updateNotifySettings(
       inputNotifyPeer,
       inputSettings
     );
@@ -375,11 +383,18 @@ const OtherSection = () => {
 const NotificationsSection = () => {
   const {uiNotificationsManager} = useHotReloadGuard();
   const [appSettings, setAppSettings] = useAppSettings();
-  const [permission, setPermission] = createSignal<NotificationPermission>(Notification.permission);
+  const [permission, setPermission] = createSignal<NotificationPermission>(
+    IS_NOTIFICATION_SUPPORTED ? Notification.permission : 'denied'
+  );
   const isGranted = createMemo(() => permission() === 'granted');
 
   const onClick = (e: MouseEvent) => {
     cancelEvent(e);
+    if(!IS_NOTIFICATION_SUPPORTED) {
+      toastNew({langPackKey: 'Notifications.Restricted'});
+      return;
+    }
+
     // const now = Date.now();
     Notification.requestPermission().then((permission) => {
       setPermission(permission);

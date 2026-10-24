@@ -8,10 +8,12 @@ import {StoriesProfileList, profileStoriesButtonMenu} from '@components/stories/
 import {StoriesSelection} from '@components/stories/selection';
 import {StoriesContextActions, StoriesContextState} from '@components/stories/store';
 import {getFirstChild} from '@solid-primitives/refs';
-import {AppMyStoriesTab} from '@components/solidJsTabs/tabs';
 import {useSuperTab} from '@components/solidJsTabs/superTabProvider';
 import {usePromiseCollector} from '@components/solidJsTabs/promiseCollector';
 import {useHotReloadGuard} from '@lib/solidjs/hotReloadGuard';
+import createSharedMediaScrollDateBadge from '@components/sharedMediaScrollDateBadge';
+import type {AppMyStoriesTab} from '@components/solidJsTabs/tabs';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 const MyStories: Component = () => {
   const [tab] = useSuperTab<typeof AppMyStoriesTab>();
@@ -37,7 +39,7 @@ const MyStories: Component = () => {
   );
 
   const openArchive = () => {
-    tab.slider.createTab(AppMyStoriesTab).open({...AppMyStoriesTab.getInitArgs(), isArchive: true, chatId});
+    tab.slider.createTab(hotReloadGuard.tabs.AppMyStoriesTab).open({...hotReloadGuard.tabs.AppMyStoriesTab.getInitArgs(), isArchive: true, chatId});
   };
 
   onMount(() => {
@@ -46,6 +48,26 @@ const MyStories: Component = () => {
 
     const middleware = tab.middlewareHelper.get();
     let loadPromise: Promise<any>;
+    const scrollDateBadge = createSharedMediaScrollDateBadge({
+      mount: (element) => storiesContainer.querySelector('.stories-album-wrapper').before(element),
+      getAnchorTop: () => tab.scrollable.container.getBoundingClientRect().top,
+      getItems: () => storiesContainer.querySelectorAll<HTMLElement>(
+        '.stories-album-content .search-super-item[data-timestamp]'
+      )
+    });
+    const onAdditionalScroll = tab.scrollable.onAdditionalScroll;
+    const updateScrollDateBadge = () => {
+      onAdditionalScroll?.();
+      scrollDateBadge.update(true);
+    };
+    tab.scrollable.onAdditionalScroll = updateScrollDateBadge;
+    middleware.onClean(() => {
+      if(tab.scrollable.onAdditionalScroll === updateScrollDateBadge) {
+        tab.scrollable.onAdditionalScroll = onAdditionalScroll;
+      }
+
+      scrollDateBadge.destroy();
+    });
 
     createRoot((dispose) => {
       middleware.onClean(() => {
@@ -87,6 +109,7 @@ const MyStories: Component = () => {
     const menuBtn = ButtonMenuToggle({
       listenerSetter: tab.listenerSetter,
       direction: 'bottom-left',
+      buttonOptions: {ariaLabel: 'MultiAccount.More'},
       buttons: [
         ...profileStoriesButtonMenu({
           peerId: rootScope.myId,

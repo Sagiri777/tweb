@@ -14,6 +14,7 @@ import Button from '@components/buttonTsx';
 import {useHotReloadGuard} from '@lib/solidjs/hotReloadGuard';
 import findAndSplice from '@helpers/array/findAndSplice';
 import {useAppConfig} from '@stores/appState';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 type AppPasskeysTabClass = typeof AppPasskeysTab;
 
@@ -35,6 +36,7 @@ const PasskeyItem = (passkey: Passkey) => {
           icon: 'delete',
           text: 'Delete',
           onClick: async() => {
+            const managers = bindManagersToSession(rootScope.managers);
             await confirmationPopup({
               titleLangKey: 'Passkey.Deletion.Title',
               descriptionLangKey: 'Passkey.Deletion.Text',
@@ -45,7 +47,7 @@ const PasskeyItem = (passkey: Passkey) => {
             });
 
             setDisabled(true);
-            rootScope.managers.appAccountManager.deletePasskey(passkey.id).finally(() => {
+            managers.appAccountManager.deletePasskey(passkey.id).finally(() => {
               tab.payload.setPasskeys((passkeys) => {
                 const arr = [...passkeys];
                 findAndSplice(arr, (item) => item.id === passkey.id);
@@ -58,7 +60,7 @@ const PasskeyItem = (passkey: Passkey) => {
       }}
     >
       <Show when={!passkey.software_emoji_id}>
-        <Row.Icon icon="key" />
+        <Row.Icon icon="key_filled" />
       </Show>
       <Row.Title class="text-bold">{wrapEmojiText(passkey.name)}</Row.Title>
       <Row.Subtitle>{subtitle()}</Row.Subtitle>
@@ -104,7 +106,7 @@ const PasskeysTab = () => {
     >
       <MediaHeader>
         <MediaHeader.Sticker name="key" size={100} />
-        <MediaHeader.Subtitle secondary>{i18n('Passkey.Subtitle')}</MediaHeader.Subtitle>
+        <MediaHeader.Subtitle color="secondary">{i18n('Passkey.Subtitle')}</MediaHeader.Subtitle>
       </MediaHeader>
       <div class={styles.items}>
         <For each={tab.payload.passkeys}>

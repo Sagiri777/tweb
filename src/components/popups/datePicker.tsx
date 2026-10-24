@@ -4,7 +4,7 @@ import classNames from '@helpers/string/classNames';
 import mediaSizes from '@helpers/mediaSizes';
 import I18n, {i18n, LangPackKey, FormatterArguments} from '@lib/langPack';
 import {ButtonIconTsx} from '@components/buttonIconTsx';
-import InputField from '@components/inputField';
+import {createTimeInputs, padTime} from '@components/timeInputs';
 import rootScope from '@lib/rootScope';
 import ListenerSetter from '@helpers/listenerSetter';
 import {formatTime, earliestSelectableMinuteMs} from '@helpers/date';
@@ -13,6 +13,7 @@ import {wrapReplyMedia} from '@components/chat/replyContainer';
 import createMiddleware from '@helpers/solid/createMiddleware';
 import {Message, MessagesFilter} from '@layer';
 import {ScrollableContextValue} from '@components/scrollable2';
+import smoothScrollBehavior from '@helpers/dom/smoothScrollBehavior';
 
 const MILLIS_IN_MINUTE = 60 * 1000;
 
@@ -90,6 +91,9 @@ export type DatePickerPopupOptions = {
   // sending popup adds a "Repeat" row here). Kept as a thunk so the JSX is
   // evaluated lazily inside the popup's Solid context.
   bodyAfter?: () => JSX.Element,
+  // Slot for caller-provided controls in the header, rendered BEFORE the
+  // date picker's own navigation controls.
+  headerActions?: () => JSX.Element,
   // Slot for caller-provided extra footer buttons, rendered AFTER the primary
   // confirm button (e.g. "Send when online" secondary button).
   footerAfter?: () => JSX.Element,
@@ -179,8 +183,6 @@ export default function showDatePickerPopup(opts: DatePickerPopupOptions): void 
         setSelectionEnd(null);
       });
     }
-    const [hoursValue, setHoursValue] = createSignal(('0' + initHours).slice(-2));
-    const [minutesValue, setMinutesValue] = createSignal(('0' + initMinutes).slice(-2));
 
     // Scroll state — fed from PopupElement.Scrollable's onScroll callback
     const [scrollTop, setScrollTop] = createSignal(0);
@@ -205,52 +207,14 @@ export default function showDatePickerPopup(opts: DatePickerPopupOptions): void 
     maxMonth.setDate(1);
     maxMonth.setHours(0, 0, 0, 0);
 
-    // Time inputs (kept imperative — InputField is a legacy DOM construction helper)
-    let hoursInputField: InputField;
-    let minutesInputField: InputField;
-    if(opts.withTime) {
-      hoursInputField = new InputField({plainText: true});
-      minutesInputField = new InputField({plainText: true});
-      hoursInputField.setValueSilently(hoursValue());
-      minutesInputField.setValueSilently(minutesValue());
-
-      const handleTimeInput = (
-        max: number,
-        inputField: InputField,
-        setStateValue: (v: string) => void,
-        onInput: (length: number) => void,
-        onOverflow?: (number: number) => void
-      ) => {
-        const maxString = '' + max;
-        listenerSetter.add(inputField.input)('input', () => {
-          let value = inputField.value.replace(/\D/g, '');
-          if(value.length > 2) {
-            value = value.slice(0, 2);
-          } else {
-            if((value.length === 1 && +value[0] > +maxString[0]) || (value.length === 2 && +value > max)) {
-              if(value.length === 2 && onOverflow) {
-                onOverflow(+value[1]);
-              }
-              value = '0' + value[0];
-            }
-          }
-          inputField.setValueSilently(value);
-          setStateValue(value);
-          onInput(value.length);
-        });
-      };
-
-      handleTimeInput(23, hoursInputField, setHoursValue, (length) => {
-        if(length === 2) minutesInputField.input.focus();
-      }, (number) => {
-        const next = (number + minutesInputField.value).slice(0, 2);
-        minutesInputField.setValueSilently(next);
-        setMinutesValue(next);
-      });
-      handleTimeInput(59, minutesInputField, setMinutesValue, (length) => {
-        if(!length) hoursInputField.input.focus();
-      });
-    }
+    // Time inputs — the shared HH:MM pair (see @components/timeInputs)
+    const timeInputs = opts.withTime ? createTimeInputs({
+      listenerSetter,
+      hours: initHours,
+      minutes: initMinutes
+    }) : undefined;
+    const hoursValue = () => timeInputs?.hours() ?? padTime(initHours);
+    const minutesValue = () => timeInputs?.minutes() ?? padTime(initMinutes);
 
     // ─────────────────────────────────────────────────────────────────────────
     // Build the chronological list of month sections (oldest → newest).
@@ -385,7 +349,7 @@ export default function showDatePickerPopup(opts: DatePickerPopupOptions): void 
       // would suppress the scroll event we need to update reactive state.
       scrollableHostRef.scrollTo({
         top: section.offset,
-        behavior: smooth ? 'smooth' : 'auto'
+        behavior: smooth ? smoothScrollBehavior() : 'auto'
       });
     }
 
@@ -778,17 +742,23 @@ export default function showDatePickerPopup(opts: DatePickerPopupOptions): void 
             <div class="date-picker-month-title">{monthTitleEl()}</div>
           </PopupElement.Title>
           <div class="date-picker-controls">
+            <Show when={opts.headerActions}>
+              {opts.headerActions()}
+            </Show>
             <Show when={showMultiSelectToggle}>
               <ButtonIconTsx
                 icon="select"
                 class={classNames('date-picker-multiselect', 'primary', multiSelectActive() && 'is-active')}
                 noRipple
+                aria-label={I18n.format('Message.Context.Select', true)}
+                aria-pressed={multiSelectActive()}
                 onClick={toggleMultiSelect}
               />
             </Show>
             <ButtonIconTsx
               icon="up"
               class={classNames('date-picker-prev', 'primary')}
+              aria-label={I18n.format('AccDescr.PreviousMonth', true)}
               noRipple
               disabled={isPrevDisabled()}
               onClick={onPrev}
@@ -796,6 +766,7 @@ export default function showDatePickerPopup(opts: DatePickerPopupOptions): void 
             <ButtonIconTsx
               icon="down"
               class={classNames('date-picker-next', 'primary')}
+              aria-label={I18n.format('AccDescr.NextMonth', true)}
               noRipple
               disabled={isNextDisabled()}
               onClick={onNext}
@@ -808,7 +779,6 @@ export default function showDatePickerPopup(opts: DatePickerPopupOptions): void 
           ref={(el) => scrollableHostRef = el}
           contextRef={(ctx) => scrollableContextRef = ctx}
           onScroll={onScroll}
-          withBorders="both"
         >
           <div class="date-picker-months" style={{height: totalHeight + 'px'}}>
             <For each={visibleSections()}>{(section) => (
@@ -876,9 +846,9 @@ export default function showDatePickerPopup(opts: DatePickerPopupOptions): void 
 
         <Show when={opts.withTime}>
           <div class="date-picker-time">
-            {hoursInputField.container}
+            {timeInputs.hoursInputField.container}
             <div class="date-picker-time-delimiter">:</div>
-            {minutesInputField.container}
+            {timeInputs.minutesInputField.container}
           </div>
         </Show>
 

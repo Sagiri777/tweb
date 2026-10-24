@@ -3,7 +3,10 @@ import IMAGE_MIME_TYPES_SUPPORTED from '@environment/imageMimeTypesSupport';
 import VIDEO_MIME_TYPES_SUPPORTED from '@environment/videoMimeTypesSupport';
 import {createImageAndURLFromBlob} from '@helpers/createImageAndURLFromBlob';
 import {getAppWindow} from '@helpers/appWindow';
+import {createObjectURL, revokeObjectURL} from '@helpers/objectUrl';
 import rootScope from '@lib/rootScope';
+import {hotReloadGuardReady} from '@lib/solidjs/hotReloadGuardProvider';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 
 type OnFinishArgs = {
@@ -40,6 +43,8 @@ export async function getFileAndOpenEditor({
   shouldOpenEditor,
   onSkipEditor
 }: GetFileAndOpenEditorArgs) {
+  // * the editor opens for the account the file was asked on, and not at all once the tab is on another
+  const managers = bindManagersToSession(rootScope.managers);
   const input = createHiddenFileInput(acceptMediaTypes);
   document.body.append(input);
 
@@ -58,14 +63,21 @@ export async function getFileAndOpenEditor({
 
   let mediaSrc: string;
   if(isVideo) {
-    mediaSrc = URL.createObjectURL(file);
+    mediaSrc = createObjectURL(file);
   } else {
     const imgResult = await createImageAndURLFromBlob(file); // make sure to render the image to know if it's valid
     if(!imgResult.ok) return;
     mediaSrc = imgResult.url;
   }
 
-  const {openMediaEditorFromMediaRaw} = await import('@components/mediaEditor');
+  let openMediaEditorFromMediaRaw: typeof import('@components/mediaEditor')['openMediaEditorFromMediaRaw'];
+  try {
+    // the editor mounts the app's top level, which nothing has loaded yet when the sign-up screen opens it
+    [{openMediaEditorFromMediaRaw}] = await Promise.all([import('@components/mediaEditor'), hotReloadGuardReady()]);
+  } catch(error) {
+    revokeObjectURL(mediaSrc);
+    throw error;
+  }
 
   openMediaEditorFromMediaRaw({
     isEditingForAvatar,
@@ -73,7 +85,7 @@ export async function getFileAndOpenEditor({
     canFinishWithoutChanges: true,
     canImageResultInGIF,
     getMediaBlob: async() => file,
-    managers: rootScope.managers,
+    managers,
     mediaSrc,
     mediaType: isVideo ? 'video' : 'image',
     // Editing an avatar with a video → avatar-video mode (≤10s trim, forced mute,
@@ -82,7 +94,7 @@ export async function getFileAndOpenEditor({
     initialTab: isVideo ? 'adjustments' : 'crop',
     onEditFinish: (editorResult) => onFinish({editorResult, originalFile: file}),
     dontCreatePreview,
-    onClose: () => { }
+    onClose: () => revokeObjectURL(mediaSrc)
   });
 }
 

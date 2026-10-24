@@ -27,14 +27,15 @@ export function useCollapsable(props: {
   const folded = createMemo(() => progress() === STATE_FOLDED);
 
   const setProgress = (progress: number, skipAnimation?: boolean) => {
-    if(liteMode.isAvailable('animations') && !skipAnimation) setIsTransition(true);
+    if(liteMode.isAvailable('motion') && !skipAnimation) setIsTransition(true);
     _setProgress(progress);
   };
 
   const scrollTo = (wasProgress: number, open?: boolean) => {
     const startTime = Date.now();
+    const duration = liteMode.isAvailable('motion') ? 125 : 0;
     const _animation = animation = animateSingle(() => {
-      const value = clamp((Date.now() - startTime) / 125, 0, 1);
+      const value = duration ? clamp((Date.now() - startTime) / duration, 0, 1) : 1;
 
       let progress = wasProgress;
       if((wasProgress > 0.5 || open === false) && open !== true) {
@@ -146,9 +147,12 @@ export function useCollapsable(props: {
       return;
     }
 
-    const wheelDeltaY = (e as any).wheelDeltaY as number;
-    const delta: number = -wheelDeltaY;
-    onMove(delta, e);
+    // * `wheelDeltaY` is a non-standard WebKit/Blink property that Firefox has never had, so
+    // * `-wheelDeltaY` came back NaN there and `NaN < 0` made every wheel resolve to
+    // * STATE_FOLDED — the collapsible could never be unfolded, and a folded stories list is
+    // * `pointer-events: none`, so clicking a story did nothing. `deltaY` is the standard
+    // * equivalent and carries the same sign, which is all `onMove` reads off it.
+    onMove(e.deltaY, e);
   };
   subscribeOn(props.listenWheelOn)('wheel', onWheel, {passive: false});
 

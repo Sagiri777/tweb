@@ -37,6 +37,22 @@
     // transform: skew(0deg, -45deg);
   }
 
+  // * peer-colour background-emoji pattern, a mask painted with the box's colour (wrapPeerColorPattern)
+  &-pattern {
+    position: absolute;
+    top: 0;
+    inset-inline-end: 0;
+    pointer-events: none;
+    background-color: var(--primary-color);
+    mask-image: var(--pattern-mask);
+    mask-size: 100% 100%;
+
+    // * the emoji gather in the corner the box is pinned to (wrapPeerColorPattern)
+    .is-rtl & {
+      mask-image: var(--pattern-mask-rtl, var(--pattern-mask));
+    }
+  }
+
   &-icon {
     &:after {
       position: absolute;
@@ -49,7 +65,7 @@
 
     &:after {
       // content: var(--quote-icon);
-      content: $tgico-quote;
+      content: $tgico-quote_filled;
       font-family: '#{$tgico-font-family}' !important;
     }
   }
@@ -62,6 +78,12 @@
     height: 1rem;
     overflow: hidden;
     cursor: pointer;
+    // a <button>
+    padding: 0;
+    border: 0;
+    background: none;
+    color: inherit;
+    font: inherit;
 
     &:after {
       position: relative;
@@ -71,7 +93,7 @@
       display: inline-block;
       transform: rotate(0deg);
 
-      @include animation-level(2) {
+      @include animation-level(1) {
         transition: transform var(--transition-standard-in);
       }
     }
@@ -80,7 +102,7 @@
   &-collapsable {
     max-height: calc(var(--messages-secondary-line-height) * 3 + 2px); // don't forget padding here
 
-    @include animation-level(2) {
+    @include animation-level(1) {
       transition: max-height var(--transition-standard-in);
     }
 

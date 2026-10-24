@@ -28,6 +28,7 @@ export default function hasRights(
 
   if(chat._ === 'chatForbidden' ||
       chat._ === 'channelForbidden' ||
+      chat._ === 'communityForbidden' ||
       // (chat as any).pFlags.kicked ||
       (chat.pFlags.left && !(chat as Chat.channel).pFlags.megagroup)) {
     return false;
@@ -118,6 +119,12 @@ export default function hasRights(
 
     case 'change_info':
     case 'invite_users': {
+      // a Community is administered like a channel: these are granted rights,
+      // not member ones its default banned rights could take away
+      if(chat._ === 'community') {
+        return isAdmin && !!myFlags[action];
+      }
+
       return isAdmin || (chat as Chat.channel).pFlags.broadcast ? !!myFlags[action] : !myFlags[action];
     }
 
@@ -128,6 +135,8 @@ export default function hasRights(
     case 'anonymous':
     case 'post_messages':
     case 'manage_direct_messages':
+    case 'manage_linked_peers':
+    case 'manage_welcome_messages':
     case 'edit_messages': {
       return isAdmin && !!myFlags[action];
     }
@@ -138,6 +147,9 @@ export default function hasRights(
     }
 
     case 'view_participants': {
+      if(chat._ === 'community') {
+        return !!(chat.pFlags.creator || isAdmin);
+      }
       return !!(chat._ === 'chat' || !chat.pFlags.broadcast || chat.pFlags.creator || isAdmin);
     }
 
@@ -153,6 +165,23 @@ export default function hasRights(
 
     case 'just_admin': {
       return isAdmin;
+    }
+
+    // * member tags live in groups only
+    // * own tag: any admin can set theirs, a member unless the group (or a restriction) forbids it
+    case 'edit_rank':
+    // * someone else's tag
+    case 'manage_ranks': {
+      if(chat._ === 'community' || (chat as Chat.channel).pFlags.broadcast) {
+        return false;
+      }
+
+      if(action === 'manage_ranks') {
+        return isAdmin && !!myFlags[action];
+      }
+
+      // * one member's restrictions do not lift the group's own ban, the two add up (desktop)
+      return isAdmin || (!myFlags[action] && !(chat as Chat.channel).default_banned_rights?.pFlags[action]);
     }
 
     // case 'view_statistics': {

@@ -23,7 +23,7 @@
   align-items: center;
   justify-content: center;
   gap: 1rem;
-  margin-top: 2rem;
+  margin-block: 2rem;
 }
 
 .avatarWrap {
@@ -32,7 +32,7 @@
 
 .locationIcon {
   position: absolute;
-  right: -0.25rem;
+  inset-inline-end: -0.25rem;
   bottom: -0.25rem;
   background: var(--primary-color);
   color: var(--white);
@@ -44,10 +44,4 @@
   display: flex;
   align-items: center;
   justify-content: center;
-}
-
-.text {
-  text-align: center;
-  text-wrap: balance;
-  margin-top: 2rem;
 }

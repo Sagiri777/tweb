@@ -1,28 +1,25 @@
+import I18n, {LangPackKey} from '@lib/langPack';
 import type LazyLoadQueueIntersector from '@components/lazyLoadQueueIntersector';
 import IS_TOUCH_SUPPORTED from '@environment/touchSupport';
-import appImManager from '@lib/appImManager';
 import rootScope from '@lib/rootScope';
 import animationIntersector, {AnimationItemGroup} from '@components/animationIntersector';
 import {horizontalMenu} from '@components/horizontalMenu';
 import LazyLoadQueue from '@components/lazyLoadQueue';
 import Scrollable, {ScrollableX} from '@components/scrollable';
-import appSidebarRight from '@components/sidebarRight';
 import StickyIntersector from '@components/stickyIntersector';
 import EmojiTab, {EmojiTabCategory, getEmojiFromElement} from '@components/emoticonsDropdown/tabs/emoji';
 import GifsTab from '@components/emoticonsDropdown/tabs/gifs';
 import StickersTab from '@components/emoticonsDropdown/tabs/stickers';
 import {MOUNT_CLASS_TO} from '@config/debug';
-import {AppGifsTab} from '@components/solidJsTabs/tabs';
-import {AppStickersTab} from '@components/solidJsTabs/tabs';
+import {hotListen} from '@helpers/hotModule';
 import findUpClassName from '@helpers/dom/findUpClassName';
 import findUpTag from '@helpers/dom/findUpTag';
 import blurActiveElement from '@helpers/dom/blurActiveElement';
 import whichChild from '@helpers/dom/whichChild';
 import cancelEvent from '@helpers/dom/cancelEvent';
 import DropdownHover from '@helpers/dropdownHover';
-import pause from '@helpers/schedulers/pause';
 import {IS_APPLE_MOBILE} from '@environment/userAgent';
-import {AppManagers} from '@lib/managers';
+import {ReadingManagers} from '@lib/managers';
 import {attachClickEvent, simulateClickEvent} from '@helpers/dom/clickEvent';
 import overlayCounter from '@helpers/overlayCounter';
 import {getAppWindow, getOverlayRoot} from '@helpers/appWindow';
@@ -36,12 +33,14 @@ import {ChatRights} from '@appManagers/appChatsManager';
 import {toastNew} from '@components/toast';
 import ChatInput, {POSTING_NOT_ALLOWED_MAP} from '@components/chat/input';
 import safeAssign from '@helpers/object/safeAssign';
-import ButtonIcon from '@components/buttonIcon';
+import Tabs from '@components/tabs';
 import StickersTabCategory from '@components/emoticonsDropdown/category';
 import {Middleware} from '@helpers/middleware';
 import {Accessor, createSignal, Setter} from 'solid-js';
+import {getChatInputEditor} from '@components/chat/inputEditor/registry';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
+import {EMOJI_TEXT_COLOR, EMOTICONSSTICKERGROUP} from '@components/emoticonsDropdown/constants';
 
-export const EMOTICONSSTICKERGROUP: AnimationItemGroup = 'emoticons-dropdown';
 
 export interface EmoticonsTab {
   content: HTMLElement;
@@ -53,6 +52,7 @@ export interface EmoticonsTab {
   onOpened?: () => void;
   onClose?: () => void;
   onClosed?: () => void;
+  onPeerChanged?: () => void;
 }
 
 export interface EmoticonsTabConstructable<T extends EmoticonsTab = any> {
@@ -72,25 +72,28 @@ const renderEmojiDropdownElement = (): HTMLDivElement => {
       <div class="emoji-container">
         <div class="tabs-container"></div>
       </div>
-      <div class="emoji-tabs menu-horizontal-div emoticons-menu no-stripe"></div>
     </div>`;
-  const a: [string, string, number][] = [
-    ['search justify-self-start', 'search', -1],
-    ['emoji', 'smile', 0],
-    ['stickers', 'stickers_face', 1],
-    ['gifs', 'gifs', 2],
-    ['delete justify-self-end', 'deleteleft', -1]
+  // the first word of `className` names the tab, the rest are extra classes on it
+  const a: [string, Icon, number, LangPackKey][] = [
+    ['search justify-self-start', 'search', -1, 'Search'],
+    ['emoji', 'smile', 0, 'Emoji'],
+    ['stickers', 'stickers_face', 1, 'AccDescr.Stickers'],
+    ['gifs', 'gifs', 2, 'AccDescr.Gifs'],
+    ['delete justify-self-end', 'deleteleft', -1, 'AccDescr.DeleteLastCharacter']
   ];
   const d = div.firstElementChild as HTMLDivElement;
-  d.lastElementChild.append(...a.map(([className, icon, tabId]) => {
-    const button = ButtonIcon(`${icon} menu-horizontal-div-item emoji-tabs-${className}`, {noRipple: true});
-    button.dataset.tab = '' + tabId;
-    return button;
-  }));
+  d.append(Tabs.Menu({
+    class: 'emoji-tabs emoticons-menu no-stripe',
+    children: a.map(([className, icon, tabId, ariaLabel]) => Tabs.MenuIconTab({
+      icon,
+      class: `emoji-tabs-${className}`,
+      tab: tabId,
+      label: I18n.format(ariaLabel, true)
+    }))
+  }) as HTMLElement);
   return d;
 }
 
-export const EMOJI_TEXT_COLOR = 'primary-text-color';
 
 export class EmoticonsDropdown extends DropdownHover {
   public lazyLoadQueue = new LazyLoadQueue(1);
@@ -108,7 +111,7 @@ export class EmoticonsDropdown extends DropdownHover {
 
   private savedRange: Range;
   private tabsToRender: EmoticonsTab[] = [];
-  private managers: AppManagers;
+  private managers: ReadingManagers;
 
   private rights: {[action in ChatRights]?: boolean};
 
@@ -239,7 +242,7 @@ export class EmoticonsDropdown extends DropdownHover {
   }
 
   public get chatInput() {
-    return this._chatInput || appImManager.chat.input;
+    return this._chatInput || hotReloadGuard.appImManager.chat.input;
   }
 
   public set chatInput(chatInput: ChatInput) {
@@ -294,12 +297,12 @@ export class EmoticonsDropdown extends DropdownHover {
     this.searchButton = this.element.querySelector('.emoji-tabs-search');
     this.listenerSetter.add(this.searchButton)('click', () => {
       if(this.tabId === this.getTab(StickersTab)?.tabId) {
-        if(!appSidebarRight.isTabExists(AppStickersTab)) {
-          appSidebarRight.createTab(AppStickersTab).open();
+        if(!hotReloadGuard.appSidebarRight.isTabExists(hotReloadGuard.tabs.AppStickersTab)) {
+          hotReloadGuard.appSidebarRight.createTab(hotReloadGuard.tabs.AppStickersTab).open();
         }
       } else {
-        if(!appSidebarRight.isTabExists(AppGifsTab)) {
-          appSidebarRight.createTab(AppGifsTab).open();
+        if(!hotReloadGuard.appSidebarRight.isTabExists(hotReloadGuard.tabs.AppGifsTab)) {
+          hotReloadGuard.appSidebarRight.createTab(hotReloadGuard.tabs.AppGifsTab).open();
         }
       }
     });
@@ -308,6 +311,12 @@ export class EmoticonsDropdown extends DropdownHover {
     attachClickEvent(this.deleteBtn, (e) => {
       cancelEvent(e);
       const input = this.chatInput.messageInput;
+      const editor = getChatInputEditor(input);
+      if(editor) {
+        editor.deleteBackward();
+        return;
+      }
+
       // RichInputHandler.getInstance().makeFocused(this.chatInput.messageInput);
       let range = RichInputHandler.getInstance().getSavedRange(input);
       if(!range) {
@@ -405,6 +414,10 @@ export class EmoticonsDropdown extends DropdownHover {
     };
 
     const onPeerChanged = () => {
+      // tabs track per-chat content (the group's own sticker set), so they are told
+      // about the switch even when the dropdown itself is pinned to one chat input
+      this.tabsToRender.forEach((tab) => tab.onPeerChanged?.());
+
       if(this._chatInput || this.isStandalone) {
         return;
       }
@@ -412,8 +425,8 @@ export class EmoticonsDropdown extends DropdownHover {
       this.checkRights();
     };
 
-    this.listenerSetter.add(appImManager)('peer_changing', onPeerChanging);
-    this.listenerSetter.add(appImManager)('peer_changed', onPeerChanged);
+    this.listenerSetter.add(hotReloadGuard.appImManager)('peer_changing', onPeerChanging);
+    this.listenerSetter.add(hotReloadGuard.appImManager)('peer_changed', onPeerChanged);
     onPeerChanged();
 
     const ret = super.init();
@@ -582,7 +595,8 @@ export class EmoticonsDropdown extends DropdownHover {
       }
 
       const tab = emoticons.getCategoryByContainer(target);
-      if(!tab.elements.menuTab) {
+      // the entry may describe a category deleted since the observer queued it
+      if(!tab?.elements.menuTab) {
         return;
       }
 
@@ -737,6 +751,24 @@ export class EmoticonsDropdown extends DropdownHover {
   }
 }
 
-const emoticonsDropdown = new EmoticonsDropdown();
+// one panel per account the tab shows. The holder is what a hot update keeps (see @helpers/hotRegistry): the export
+// is a live binding, so that an account switch puts another instance in its place for every importer
+const shown = {dropdown: new EmoticonsDropdown()};
+let emoticonsDropdown = shown.dropdown;
 MOUNT_CLASS_TO.emoticonsDropdown = emoticonsDropdown;
-export default emoticonsDropdown;
+
+// * its tabs hold the account's stickers, saved GIFs and emoji sets - another account gets a dropdown
+// * of its own, unless this one was never opened and so holds nothing yet
+hotListen(import.meta.hot, rootScope, 'account_switched', () => {
+  if(emoticonsDropdown.init) {
+    return;
+  }
+
+  emoticonsDropdown.destroy();
+  emoticonsDropdown = shown.dropdown = new EmoticonsDropdown();
+  MOUNT_CLASS_TO.emoticonsDropdown = emoticonsDropdown;
+});
+
+export {emoticonsDropdown as default};
+
+if(import.meta.hot) import.meta.hot.accept();

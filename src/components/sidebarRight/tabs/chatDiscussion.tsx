@@ -4,7 +4,6 @@ import findUpClassName from '@helpers/dom/findUpClassName';
 import shake from '@helpers/dom/shake';
 import toggleDisability from '@helpers/dom/toggleDisability';
 import {Chat} from '@layer';
-import appDialogsManager from '@lib/appDialogsManager';
 import hasRights from '@appManagers/utils/chats/hasRights';
 import getPeerActiveUsernames from '@appManagers/utils/peers/getPeerActiveUsernames';
 import {i18n, LangPackKey} from '@lib/langPack';
@@ -12,7 +11,6 @@ import rootScope from '@lib/rootScope';
 import Button from '@components/buttonTsx';
 import Section from '@components/section';
 import confirmationPopup from '@components/confirmationPopup';
-import {AppNewGroupTab} from '@components/solidJsTabs/tabs';
 import {toastNew} from '@components/toast';
 import getPeerTitle from '@components/wrappers/getPeerTitle';
 import wrapPeerTitle from '@components/wrappers/peerTitle';
@@ -21,6 +19,7 @@ import {useSuperTab} from '@components/solidJsTabs/superTabProvider';
 import {usePromiseCollector} from '@components/solidJsTabs/promiseCollector';
 import {useHotReloadGuard} from '@lib/solidjs/hotReloadGuard';
 import type {AppChatDiscussionTab} from '@components/solidJsTabs/tabs';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 const ChatDiscussion: Component = () => {
   const [tab] = useSuperTab<typeof AppChatDiscussionTab>();
@@ -33,10 +32,10 @@ const ChatDiscussion: Component = () => {
   let canChangeInfo: boolean;
 
   let stickerContainer!: HTMLDivElement;
-  let sectionContent!: HTMLElement;
   let btnUnlink!: HTMLElement;
 
   const [captionEl, setCaptionEl] = createSignal<HTMLElement>();
+  const [chatlistElement, setChatlistElement] = createSignal<HTMLElement>();
   const [sectionCaption, setSectionCaption] = createSignal<LangPackKey>();
   const [isBroadcastSig, setIsBroadcastSig] = createSignal(false);
   const [createGroupHidden, setCreateGroupHidden] = createSignal(false);
@@ -53,7 +52,7 @@ const ChatDiscussion: Component = () => {
     let title = await getPeerTitle({peerId: chatId.toPeerId(true), plainText: true});
     title += ' Chat';
 
-    const subTab = tab.slider.createTab(AppNewGroupTab);
+    const subTab = tab.slider.createTab(hotReloadGuard.tabs.AppNewGroupTab);
     subTab.open({
       peerIds: [],
       onCreate: (newChatId) => {
@@ -121,7 +120,7 @@ const ChatDiscussion: Component = () => {
         ));
       };
 
-      const chatlist = appDialogsManager.createChatList();
+      const chatlist = hotReloadGuard.appDialogsManager.createChatList();
       chatlist.classList.add('chatlist');
 
       let busy = false;
@@ -171,7 +170,10 @@ const ChatDiscussion: Component = () => {
           d.append(br.cloneNode(), br.cloneNode(), i18n('Discussion.Set.PrivateGroup'));
         }
 
-        if(groupChatFull._ === 'chatFull' || groupChatFull.pFlags.hidden_prehistory) {
+        if(
+          groupChatFull._ === 'chatFull' ||
+          (groupChatFull._ === 'channelFull' && groupChatFull.pFlags.hidden_prehistory)
+        ) {
           d.append(br.cloneNode(), br.cloneNode(), i18n('DiscussionLinkGroupAlertHistory'));
         }
 
@@ -192,7 +194,7 @@ const ChatDiscussion: Component = () => {
         busy = false;
       }, {listenerSetter: tab.listenerSetter});
 
-      sectionContent.append(chatlist);
+      setChatlistElement(chatlist);
 
       const loadPromises: Promise<any>[] = [];
 
@@ -219,7 +221,7 @@ const ChatDiscussion: Component = () => {
 
         const promises = chats.map((chat) => {
           const loadPromises: Promise<any>[] = [];
-          const {dom} = appDialogsManager.addDialogNew({
+          const {dom} = hotReloadGuard.appDialogsManager.addDialogNew({
             peerId: chat.id.toPeerId(true),
             container: chatlist,
             rippleEnabled: true,
@@ -287,7 +289,8 @@ const ChatDiscussion: Component = () => {
     <>
       <div ref={stickerContainer} class="sticker-container" />
       <div class="caption">{captionEl()}</div>
-      <Section caption={sectionCaption()} contentProps={{ref: (el) => sectionContent = el}}>
+      <Section caption={sectionCaption()}>
+        <Show keyed when={chatlistElement()}>{(element) => element}</Show>
         <Show when={isBroadcastSig() && !createGroupHidden()}>
           <Button
             class="btn-primary btn-transparent primary"

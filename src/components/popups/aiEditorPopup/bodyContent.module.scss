@@ -56,6 +56,15 @@
   background-color: var(--surface-color);
 }
 
+.tab, .tone {
+  color: inherit;
+
+  &:focus-visible {
+    outline: 2px solid var(--primary-color);
+    outline-offset: -2px;
+  }
+}
+
 .tab {
   position: relative;
   overflow: hidden;
@@ -98,6 +107,22 @@
   --original-collapsed-height: calc(1lh + var(--original-extra-height));
 
   position: relative;
+}
+
+.createResult {
+  --content-padding-y: 0rem;
+  --content-padding-x: 0.5em;
+}
+
+.promptField {
+  padding: 1rem var(--content-padding-x) 0;
+}
+
+.promptInput {
+  :global(.input-field-input) {
+    max-height: calc(5lh + 1.625rem);
+    overflow-y: auto;
+  }
 }
 
 .exit {
@@ -160,7 +185,7 @@
 
   &ContextMenuIcon {
     position: absolute;
-    right: 0.5rem;
+    inset-inline-end: 0.5rem;
     top: 0.5rem;
     font-size: 0.75rem;
     opacity: 0;
@@ -221,11 +246,6 @@
   flex: 64px 0;
   display: flex;
 
-  :global(.menu-send) {
-    inset-block: auto calc(100% + 0.5rem);
-    inset-inline: auto 0;
-  }
-
   :global(.btn-send-effect-container) {
     bottom: -0.25rem;
   }
@@ -265,14 +285,15 @@
 
   opacity: 0;
 
-  &Left {
-    left: 2px;
-    transform: translateY(-50%) rotate(90deg);
+  // * at the row's inline start / end, pointing outward (the chevron points down unrotated)
+  &Start {
+    inset-inline-start: 2px;
+    transform: translateY(-50%) rotate(calc(90deg * var(--reflect)));
   }
 
-  &Right {
-    right: 2px;
-    transform: translateY(-50%) rotate(-90deg);
+  &End {
+    inset-inline-end: 2px;
+    transform: translateY(-50%) rotate(calc(-90deg * var(--reflect)));
   }
 
   &.hidden {

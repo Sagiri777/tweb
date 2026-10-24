@@ -13,11 +13,14 @@ import {i18n} from '@lib/langPack';
 import Icon from '@components/icon';
 import LazyLoadQueue from '@components/lazyLoadQueue';
 import replaceContent from '@helpers/dom/replaceContent';
+import {setDirection} from '@helpers/dom/setInnerHTML';
 import limitSymbols from '@helpers/string/limitSymbols';
 import wrapEmojiText from '@lib/richTextProcessor/wrapEmojiText';
 import wrapMediaSpoiler from '@components/wrappers/mediaSpoiler';
 import {isMessageSensitive} from '@appManagers/utils/messages/isMessageRestricted';
 import compareUint8Arrays from '@helpers/bytes/compareUint8Arrays';
+import {getTodoItemReplyPreview} from '@components/wrappers/messagePreviewIcon';
+import {getRichMessagePreviewMedia} from '@components/wrappers/richMessagePreview';
 
 const MEDIA_SIZE = 32;
 
@@ -59,7 +62,8 @@ export async function wrapReplyMedia({
 
   let messageMedia: MessageMedia | WebPage.webPage = storyItem?.media ||
     (message as Message.message)?.media ||
-    (replyHeader?._ === 'messageReplyHeader' && replyHeader.reply_media);
+    (replyHeader?._ === 'messageReplyHeader' && replyHeader.reply_media) ||
+    getRichMessagePreviewMedia((message as Message.message)?.rich_message);
 
   if(messageMedia?._ === 'messageMediaStory') {
     storyItem = messageMedia.story as StoryItem.storyItem;
@@ -168,6 +172,10 @@ export async function wrapReplyDivAndCaption(options: {
 
   const {titleEl, subtitleEl, mediaEl, message, loadPromises, animationGroup, middleware, lazyLoadQueue, replyHeader} = options;
   let {storyItem, quote} = options;
+  // * a name and a message of their own direction, whichever box the caller hands in (the pinned
+  // * plate hands in no title)
+  if(titleEl) setDirection(titleEl);
+  if(subtitleEl) setDirection(subtitleEl);
   let quoteIcon: HTMLElement | undefined;
 
   let wrappedTitle = options.title;
@@ -179,7 +187,7 @@ export async function wrapReplyDivAndCaption(options: {
 
     replaceContent(titleEl, wrappedTitle);
   } else if(options.isStoryExpired) {
-    const icon = Icon('bomb', 'expired-story-icon');
+    const icon = Icon('bomb_filled', 'expired-story-icon');
     titleEl.append(icon, i18n('ExpiredStory'));
   }
 
@@ -200,6 +208,14 @@ export async function wrapReplyDivAndCaption(options: {
         text: pollOption.text.text,
         entities: pollOption.text.entities
       };
+    }
+  }
+
+  if(isMessageReply && replyHeader.todo_item_id !== undefined && message?._ === 'message' && message.media?._ === 'messageMediaToDo') {
+    const todoItemPreview = getTodoItemReplyPreview(message.media, replyHeader.todo_item_id);
+    if(todoItemPreview) {
+      quoteIcon = Icon(todoItemPreview.icon, 'inline-icon', 'inline-icon-left');
+      quote ??= todoItemPreview.text;
     }
   }
 
@@ -227,7 +243,7 @@ export async function wrapReplyDivAndCaption(options: {
   } else if(storyItem && options.storyItem) {
     subtitleEl.replaceChildren(i18n('Story'));
   } else if(options.isStoryExpired) {
-    const icon = Icon('bomb', 'expired-story-icon');
+    const icon = Icon('bomb_filled', 'expired-story-icon');
     subtitleEl.replaceChildren(icon, i18n('ExpiredStory'));
   } else if(quote) {
     const fragment = wrapRichText(limitSymbols(quote.text, 200), {
@@ -240,7 +256,10 @@ export async function wrapReplyDivAndCaption(options: {
 
     subtitleEl.replaceChildren(...[quoteIcon, fragment].filter(Boolean));
   } else if(message) {
-    const fragment = await wrapMessageForReply(options);
+    const fragment = await wrapMessageForReply({
+      ...options,
+      withoutMessageIcon: setMedia
+    });
     subtitleEl.replaceChildren(fragment);
   }
 
@@ -279,7 +298,7 @@ export default class ReplyContainer extends DivAndCaption<(options: WrapReplyOpt
       });
 
       if(options.isStoryExpired) {
-        // this.mediaEl.classList.add('is-expired-story', 'tgico-clock');
+    // this.mediaEl.classList.add('is-expired-story', 'tgico-clock_filled');
         this.container.classList.add('is-expired-story');
       }
 

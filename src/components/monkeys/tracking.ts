@@ -1,8 +1,24 @@
 import InputField from '@components/inputField';
-import lottieLoader from '@lib/rlottie/lottieLoader';
-import RLottiePlayer from '@lib/rlottie/rlottiePlayer';
+import lottieLoader from '@lib/lottie/lottieLoader';
+import LottiePlayer from '@lib/lottie/lottiePlayer';
 import CodeInputFieldCompat from '@components/codeInputField';
 import {fastRaf} from '@helpers/schedulers';
+
+const IDLE_ASSET = 'TwoFactorSetupMonkeyIdle';
+const TRACKING_ASSET = 'TwoFactorSetupMonkeyTracking';
+
+/**
+ * Fetches what the monkey is drawn from, and warms the lottie workers with it. Its two assets are
+ * loaded when the card that shows it mounts, which is after that card has entered - started early
+ * enough (the code is on its way), the sticker is there when the card opens instead of a moment,
+ * or a slow fetch, later. `loadAssetData` keeps one promise per asset, so the load below reuses it.
+ */
+export function preloadTrackingMonkey() {
+  return Promise.all([
+    lottieLoader.loadAnimationFromURLManually(IDLE_ASSET),
+    lottieLoader.loadAnimationFromURLManually(TRACKING_ASSET)
+  ]);
+}
 
 export default class TrackingMonkey {
   public container: HTMLElement;
@@ -10,8 +26,8 @@ export default class TrackingMonkey {
   protected max = 45;
   protected needFrame = 0;
 
-  protected animation: RLottiePlayer;
-  protected idleAnimation: RLottiePlayer;
+  protected animation: LottiePlayer;
+  protected idleAnimation: LottiePlayer;
 
   protected loadPromise: Promise<any>;
 
@@ -106,7 +122,7 @@ export default class TrackingMonkey {
         autoplay: true,
         width: this.size,
         height: this.size
-      }, 'TwoFactorSetupMonkeyIdle').then((animation) => {
+      }, IDLE_ASSET).then((animation) => {
         this.idleAnimation = animation;
 
         // ! animationIntersector will stop animation instantly
@@ -123,7 +139,7 @@ export default class TrackingMonkey {
         autoplay: false,
         width: this.size,
         height: this.size
-      }, 'TwoFactorSetupMonkeyTracking').then((_animation) => {
+      }, TRACKING_ASSET).then((_animation) => {
         this.animation = _animation;
 
         if(!this.inputField.value.length) {

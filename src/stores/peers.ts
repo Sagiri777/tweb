@@ -6,6 +6,10 @@ type NotEmptyPeer = Exclude<Chat, Chat.chatEmpty> | User.user;
 
 const [state, setState] = createStore<{[peerId: PeerId]: NotEmptyPeer}>({});
 
+export function usePeers() {
+  return state;
+}
+
 export function usePeer<T extends ValueOrGetter<PeerId>>(peerId: T) {
   return createMemoOrReturn(peerId, (peerId) => state[peerId]);
 }
@@ -18,10 +22,15 @@ export function useUser<T extends ValueOrGetter<UserId>>(userId: T) {
   return createMemoOrReturn<T, User>(userId, (userId) => state[userId?.toPeerId(false)] as User);
 }
 
-export function reconcilePeer(peerId: PeerId, peer: NotEmptyPeer) {
-  setState(peerId, reconcile(peer));
+export function reconcilePeer(peerId: PeerId, peer?: NotEmptyPeer) {
+  setState(peerId, peer === undefined ? undefined : reconcile(peer));
 }
 
 export function reconcilePeers(peers: {[peerId: PeerId]: NotEmptyPeer}) {
   setState(/* reconcile */(peers));
+}
+
+// * the tab switched accounts: none of the previous account's peers may stay
+export function resetPeers() {
+  setState(reconcile({}));
 }

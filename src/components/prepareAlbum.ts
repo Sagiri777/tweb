@@ -1,5 +1,8 @@
 import {Layouter, RectPart} from '@components/groupedLayout';
 
+// the gap between an album's items, in px — a message's album and a rich message's collage alike
+export const ALBUM_ITEM_SPACING = 1;
+
 export default function prepareAlbum(options: {
   container: HTMLElement,
   items: {w: number, h: number}[],
@@ -10,7 +13,13 @@ export default function prepareAlbum(options: {
   forMedia?: true,
   noGroupedItem?: boolean
 }) {
-  const layouter = new Layouter(options.items, options.maxWidth, options.minWidth, options.spacing, options.maxHeight);
+  const layouter = new Layouter(
+    options.items,
+    options.maxWidth,
+    options.minWidth,
+    options.spacing,
+    options.maxHeight
+  );
   const layout = layouter.layout();
 
   const widthItem = layout.find((item) => item.sides & RectPart.Right);
@@ -38,7 +47,8 @@ export default function prepareAlbum(options: {
     div.style.width = (geometry.width / width * 100) + '%';
     div.style.height = (geometry.height / height * 100) + '%';
     div.style.top = (geometry.y / height * 100) + '%';
-    div.style.left = (geometry.x / width * 100) + '%';
+    // * the layout's left is the line's start, as the corners below say: an album reads from the right in RTL
+    div.style.insetInlineStart = (geometry.x / width * 100) + '%';
 
     if(sides & RectPart.Left && sides & RectPart.Top) {
       div.style.borderStartStartRadius = `calc(var(--border-start-start-radius) - ${options.spacing}px)`;

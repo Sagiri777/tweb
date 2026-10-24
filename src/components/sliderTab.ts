@@ -1,4 +1,6 @@
 import EventListenerBase, {EventListenerListeners} from '@helpers/eventListenerBase';
+import {getManagersSession, isSessionLeaving} from '@lib/accounts/getCurrentAccount';
+import deferredPromise, {CancellablePromise} from '@helpers/cancellablePromise';
 import ListenerSetter from '@helpers/listenerSetter';
 import {getMiddleware, MiddlewareHelper} from '@helpers/middleware';
 import noop from '@helpers/noop';
@@ -7,6 +9,7 @@ import {i18n, LangPackKey} from '@lib/langPack';
 import ButtonIcon from '@components/buttonIcon';
 import Scrollable from '@components/scrollable';
 import SidebarSlider from '@components/slider';
+import updateScrollRegionFocusable from '@helpers/dom/scrollRegion';
 
 export interface SliderSuperTabConstructable<T extends SliderSuperTab = any> {
   new(slider: SidebarSlider, destroyable: boolean): T;
@@ -38,6 +41,19 @@ export default class SliderSuperTab {
 
   public isConfirmationNeededOnClose: () => void | boolean | Promise<any>; // should return boolean instantly or `Promise` from `confirmationPopup`
 
+  /**
+   * Resolves once the tab has finished sliding in. `open()` awaits the render,
+   * the transition runs after it — the slider resolves this when it is over.
+   */
+  public shown: CancellablePromise<void> = deferredPromise<void>();
+
+  /** A reopened tab slides in again, so what waits on `shown` has to wait anew. */
+  public resetShown() {
+    if(this.shown.isFulfilled) {
+      this.shown = deferredPromise<void>();
+    }
+  }
+
   constructor(slider: SidebarSlider, destroyable?: boolean) {
     this._constructor(slider, destroyable);
   }
@@ -64,6 +80,8 @@ export default class SliderSuperTab {
     this.content.classList.add('sidebar-content');
 
     this.scrollable = new Scrollable(this.content, undefined, undefined, true);
+    // Whether this panel's scroller is a tab stop depends on what it ends up
+    // holding, so it is decided in open() once the content exists.
     this.scrollable.attachBorderListeners(this.container);
 
     this.container.append(this.header, this.content);
@@ -78,6 +96,9 @@ export default class SliderSuperTab {
   }
 
   public async open(...args: Parameters<typeof this['init']>) {
+    // * the account session the tab opens in: one it still sets itself up for when the tab switches to another
+    // * is not among the screens the switch closes - it is not shown at all, and goes
+    const session = getManagersSession(this.managers);
     if(this.init) {
       try {
         const result = this.init(...args);
@@ -90,6 +111,13 @@ export default class SliderSuperTab {
         console.error('open tab error', err);
       }
     }
+
+    if(isSessionLeaving(session)) {
+      this.onCloseAfterTimeout();
+      return;
+    }
+
+    updateScrollRegionFocusable(this.scrollable.container, this.title.textContent);
 
     this.slider.selectTab(this);
   }

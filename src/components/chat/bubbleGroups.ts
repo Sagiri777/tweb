@@ -18,11 +18,21 @@ import getFwdFromName from '@appManagers/utils/messages/getFwdFromName';
 import {getGuestChatViaFromId, getMid, isMessage, isMessageForVerificationBot} from '@components/chat/utils';
 import {canHaveSuggestedPostReplyMarkup} from '@components/chat/bubbleParts/suggestedPostReplyMarkup';
 import getPeerId from '@appManagers/utils/peers/getPeerId';
-import {BubbleElementAddons} from '@components/chat/types';
-import ChatThreadSeparator from '@components/chat/bubbleParts/chatThreadSeparator';
-import SolidJSHotReloadGuardProvider from '@lib/solidjs/hotReloadGuardProvider';
+import type {BubbleElementAddons} from '@components/chat/types';
 import {AdminLog} from '@appManagers/appChatsManager';
+import isEphemeralMessage from '@appManagers/utils/messages/isEphemeralMessage';
+import isAnchoredEphemeralMessage from '@appManagers/utils/messages/isAnchoredEphemeralMessage';
+import {BubbleTimelineKey, compareBubbleTimelineKeys, isPendingTimelineMessage, makeBubbleTimelineKey} from '@components/chat/bubbleTimelineOrder';
+import filterReplyMarkupRows from '@components/chat/bubbleParts/filterReplyMarkupRows';
+import updateChatThreadSeparators from '@components/chat/bubbleParts/updateChatThreadSeparators';
 
+/**
+ * Where the sends still on their way stand behind an earlier send that has taken its server id: one place
+ * for all of them, so among themselves they go by date and id — in the order they were sent, whichever
+ * bubble came in first (`compareBubbleTimelineKeys`). Below the temporary id a send made after them takes
+ * from that server id (+0.0001, `generateTempMessageId`), which so comes after them.
+ */
+const BEHIND_SENT = 0.00005;
 
 type GroupItem = {
   bubble: HTMLElement,
@@ -35,24 +45,49 @@ type GroupItem = {
   single: boolean,
   group?: BubbleGroup,
   message: Message.message | Message.messageService | AdminLog, // use it only to set avatar
-  reverse?: boolean
+  reverse?: boolean,
+  timelineKey: BubbleTimelineKey
 };
 
-function insertSomething<T>(to: Array<T>, what: T, sortKey: keyof T, reverse: boolean) {
+function insertSomething<T>(
+  to: Array<T>,
+  what: T,
+  sortKey: keyof T,
+  reverse: boolean,
+  compare?: (item1: T, item2: T) => number
+) {
   if(!sortKey) {
     indexOfAndSplice(to, what);
     return (reverse ? to.push(what) : to.unshift(what)) - 1;
+  } else if(compare) {
+    indexOfAndSplice(to, what);
+
+    let left = 0;
+    let right = to.length;
+    while(left < right) {
+      const middle = (left + right) >> 1;
+      if(compare(what, to[middle]) > 0) {
+        right = middle;
+      } else {
+        left = middle + 1;
+      }
+    }
+
+    to.splice(left, 0, what);
+    return left;
   } else {
     // @ts-ignore
     return insertInDescendSortedArray(to, what, sortKey);
   }
 }
 
-function canHaveReplyMarkup(message: Message.message) {
+function compareTimelineItems(item1: GroupItem, item2: GroupItem) {
+  return compareBubbleTimelineKeys(item1.timelineKey, item2.timelineKey);
+}
+
+function getReplyMarkupRows(message: Message.message) {
   const replyMarkup = message.reply_markup;
-  let replyMarkupRows = replyMarkup?._ === 'replyInlineMarkup' && replyMarkup.rows;
-  replyMarkupRows = replyMarkupRows?.filter?.((row) => row.buttons.length);
-  return !!replyMarkupRows?.length;
+  return replyMarkup?._ === 'replyInlineMarkup' ? filterReplyMarkupRows(replyMarkup.rows) : [];
 }
 
 export class BubbleGroup {
@@ -170,7 +205,14 @@ export class BubbleGroup {
       return;
     }
 
-    this.avatar.node.classList.toggle('avatar-for-reply-markup', canHaveReplyMarkup(message));
+    const replyMarkupRows = getReplyMarkupRows(message);
+    this.avatarContainer.classList.toggle('avatar-for-reply-markup', !!replyMarkupRows.length);
+    if(replyMarkupRows.length) {
+      this.avatarContainer.style.setProperty('--reply-markup-row-count', replyMarkupRows.length.toString());
+    } else {
+      this.avatarContainer.style.removeProperty('--reply-markup-row-count');
+    }
+
     this.avatar.node.classList.toggle('avatar-for-suggested-reply-markup', canHaveSuggestedPostReplyMarkup(message));
   }
 
@@ -241,7 +283,13 @@ export class BubbleGroup {
 
   insertItem(item: GroupItem) {
     const {items} = this;
-    insertSomething(items, item, this.groups.sortGroupItemsKey, this.groups.reverse = item.reverse);
+    insertSomething(
+      items,
+      item,
+      this.groups.sortGroupItemsKey,
+      this.groups.reverse = item.reverse,
+      this.groups.compareGroupItems
+    );
 
     item.group = this;
     if(items.length === 1) {
@@ -356,11 +404,16 @@ export class BubbleGroup {
 export default class BubbleGroups {
   public itemsArr: Array<GroupItem> = []; // descend sorted
   private itemsMap: Map<HTMLElement, GroupItem> = new Map();
+  /** by mid, the timeline positions that are not the message's id: ephemeral slots, sends moved up */
+  private positions: Map<number, number> = new Map();
   public groups: Array<BubbleGroup> = []; // descend sorted
   private newGroupDiff = 121; // * 121 in scheduled messages
   private sortItemsKey: Extract<keyof GroupItem, 'timestamp' | 'mid'>;
   private sortGroupsKey: Extract<keyof BubbleGroup, 'lastMid' | 'lastTimestamp'>;
   public sortGroupItemsKey: Extract<keyof GroupItem, 'groupMid' | 'timestamp'>;
+  public compareGroupItems?: typeof compareTimelineItems;
+  private compareItems?: typeof compareTimelineItems;
+  private compareGroups?: (group1: BubbleGroup, group2: BubbleGroup) => number;
   public reverse: boolean; // * used for search
 
   constructor(private chat: Chat) {
@@ -368,6 +421,12 @@ export default class BubbleGroups {
       this.sortItemsKey = chat.type === ChatType.Scheduled ? 'timestamp' : 'mid';
       this.sortGroupsKey = chat.type === ChatType.Scheduled ? 'lastTimestamp' : 'lastMid';
       this.sortGroupItemsKey = /* chat.type === 'scheduled' ? 'timestamp' :  */'groupMid';
+
+      // scheduled messages go by their time; everything else is a timeline
+      if(chat.type !== ChatType.Scheduled) {
+        this.compareItems = this.compareGroupItems = compareTimelineItems;
+        this.compareGroups = (group1, group2) => compareTimelineItems(group1.lastItem, group2.lastItem);
+      }
     }
   }
 
@@ -376,7 +435,7 @@ export default class BubbleGroups {
     this.removeItemFromCache(item);
   }
 
-  removeAndUnmountBubble(bubble: HTMLElement) {
+  removeAndUnmountBubble(bubble: HTMLElement, deferredGroups?: Set<BubbleGroup>) {
     const item = this.getItemByBubble(bubble);
     if(!item) { // * can be a placeholder
       const parentElement = bubble.parentElement;
@@ -415,10 +474,17 @@ export default class BubbleGroups {
       this.f(nextSibling.group.items);
       group.onItemUnmount();
       modifiedGroups.add(previousSibling.group);
-      this.groupUngrouped();
+      // the items of the group taken apart do not all have to fit the previous one
+      for(const group of this.groupUngrouped()) {
+        modifiedGroups.add(group);
+      }
     }
 
-    this.mountUnmountGroups(Array.from(modifiedGroups));
+    if(deferredGroups) {
+      for(const group of modifiedGroups) deferredGroups.add(group);
+    } else {
+      this.mountUnmountGroups(Array.from(modifiedGroups));
+    }
 
     return true;
   }
@@ -440,55 +506,7 @@ export default class BubbleGroups {
   }
 
   private addChatThreadSeparators() {
-    const isMonoforum = this.chat.isMonoforum && this.chat.canManageDirectMessages && !this.chat.monoforumThreadId;
-    const isBotforum = this.chat.isBotforum && !this.chat.threadId;
-
-    const canHaveSeparators = isMonoforum || isBotforum;
-
-    if(!canHaveSeparators) return;
-
-    let prevKey: number;
-
-    forEachReverse(this.itemsArr, (item, i) => {
-      const message = item.message;
-      if(message._ === 'channelAdminLogEvent') return;
-
-      const savedPeerId = isMonoforum ? getPeerId(message?.saved_peer_id) : undefined;
-      const threadId = isBotforum ? getMessageThreadId(message, {isBotforum: true}) : undefined;
-
-      const key = savedPeerId || threadId;
-      if(!key) return;
-
-      const bubbleAddons = item.bubble as BubbleElementAddons;
-
-      if(prevKey === key) {
-        item.bubble.classList.remove('has-chat-thread-separator');
-        bubbleAddons.chatThreadSeparator?.remove();
-        return;
-      }
-
-      prevKey = key;
-
-      if(bubbleAddons.chatThreadSeparator) {
-        bubbleAddons.chatThreadSeparator.feedProps<false>({
-          index: -i
-        });
-        return;
-      }
-
-      bubbleAddons.chatThreadSeparator = new ChatThreadSeparator;
-      bubbleAddons.chatThreadSeparator.HotReloadGuard = SolidJSHotReloadGuardProvider;
-      bubbleAddons.chatThreadSeparator.feedProps({
-        chat: this.chat,
-        bubbles: this.chat.bubbles,
-        peerId: savedPeerId || this.chat.peerId,
-        threadId: savedPeerId ? undefined : threadId,
-        lastMsgId: message?.mid,
-        index: -i
-      });
-      item.bubble.classList.add('has-chat-thread-separator');
-      item.bubble.prepend(bubbleAddons.chatThreadSeparator);
-    });
+    updateChatThreadSeparators(this.itemsArr, this.chat);
   }
 
   /**
@@ -536,23 +554,72 @@ export default class BubbleGroups {
     return this.groups[0];
   }
 
+  /**
+   * Gives an item its message's new identity (a send the server confirmed, a streamed draft made final) in
+   * place, as long as the item still belongs where it stands: between the same neighbours, in the same group
+   * and date. Otherwise it changes nothing and returns false, and the bubble has to be regrouped
+   * (`ChatBubbles.repositionMessageBubble`): re-sorting the item in one array here would leave its group, the
+   * group's place among the groups and the DOM behind.
+   */
   changeBubbleMessage(bubble: HTMLElement, message: GroupItem['message']) {
     const item = this.getItemByBubble(bubble);
     if(!item) {
-      return;
+      return true;
     }
 
-    item.mid = /* item.groupMid =  */getMid(message);
-    item.message = message;
-    item.groupMid = this.generateGroupMid(message, item.dateTimestamp);
+    const changed = this.createItem(bubble, message, item.reverse);
+    if(!this.canItemStay(item, changed)) {
+      return false;
+    }
 
-    // indexOfAndSplice(item.group.items, item);
-    // // const canChangeGroupMid = !item.group.items.length || item.group.items.every((item) => item.groupMid === item.mid);
-    // // if(canChangeGroupMid) item.groupMid = mid;
-    // item.group.insertItem(item);
+    item.mid = changed.mid;
+    item.groupMid = changed.groupMid;
+    item.fromId = changed.fromId;
+    item.timestamp = changed.timestamp;
+    item.single = changed.single;
+    item.message = changed.message;
+    item.timelineKey = changed.timelineKey;
+    return true;
+  }
 
-    indexOfAndSplice(this.itemsArr, item);
-    this.insertItemToArray(item, this.itemsArr);
+  private canItemStay(item: GroupItem, changed: GroupItem) {
+    const {group} = item;
+    if(
+      !group ||
+      changed.dateTimestamp !== item.dateTimestamp ||
+      changed.fromId !== item.fromId // the group's avatar is the sender's
+    ) {
+      return false;
+    }
+
+    const isInPlace = (
+      items: GroupItem[],
+      sortKey: keyof GroupItem,
+      compare: (item1: GroupItem, item2: GroupItem) => number
+    ) => {
+      if(!sortKey) { // search results keep the order they came in
+        return true;
+      }
+
+      const [newer, older] = this.getSiblingsAtIndex(items.indexOf(item), items);
+      const compareTo = (sibling: GroupItem) => compare ?
+        compare(changed, sibling) :
+        (changed[sortKey] as number) - (sibling[sortKey] as number);
+      return (!newer || compareTo(newer) < 0) && (!older || compareTo(older) > 0);
+    };
+
+    if(
+      !isInPlace(this.itemsArr, this.sortItemsKey, this.compareItems) ||
+      !isInPlace(group.items, this.sortGroupItemsKey, this.compareGroupItems)
+    ) {
+      return false;
+    }
+
+    // neighbours share a group exactly when they can be grouped (`groupUngrouped`)
+    const siblings = this.getSiblingsAtIndex(this.itemsArr.indexOf(item), this.itemsArr);
+    return siblings.every((sibling) => {
+      return !sibling || (sibling.group === group) === this.canItemsBeGrouped(changed, sibling);
+    });
   }
 
   changeItemBubble(item: GroupItem, bubble: HTMLElement) {
@@ -575,6 +642,20 @@ export default class BubbleGroups {
 
     if(isMessageForVerificationBot(item1.message)) return false;
 
+    if(isEphemeralMessage(item1.message) !== isEphemeralMessage(item2.message)) return false;
+
+    // our own ephemeral messages say whom they went to ("Only visible to @bot"), so ones to
+    // different bots stay apart (desktop groups outgoing ephemerals by receiver)
+    if(
+      isEphemeralMessage(item1.message) &&
+      isEphemeralMessage(item2.message) &&
+      item1.message.ephemeral_receiver_id !== item2.message.ephemeral_receiver_id
+    ) return false;
+
+    // a message an ephemeral one stands in for shows content of its own — desktop keeps it
+    // out of its neighbours' group for the same reason (`sameAnchored`)
+    if(isAnchoredEphemeralMessage(item1.message) !== isAnchoredEphemeralMessage(item2.message)) return false;
+
     if(
       item1.message?._ === 'message' && item1.message?.suggested_post ||
       item2.message?._ === 'message' && item2.message?.suggested_post
@@ -585,7 +666,8 @@ export default class BubbleGroups {
       // * keep guest-chat messages from different visitors in separate groups (own avatar + "for <visitor>")
       getGuestChatViaFromId(item1.message) === getGuestChatViaFromId(item2.message) &&
       item1.dateTimestamp === item2.dateTimestamp &&
-      Math.abs(item2.timestamp - item1.timestamp) <= this.newGroupDiff &&
+      // welcome messages are read in one go whenever they were written (Android and desktop)
+      (this.chat.type === ChatType.Welcome || Math.abs(item2.timestamp - item1.timestamp) <= this.newGroupDiff) &&
       !item1.single &&
       !item2.single &&
       isOut1 === this.chat.isOutMessage(item2.message) &&
@@ -605,13 +687,6 @@ export default class BubbleGroups {
   //   return siblings.find((sibling) => sibling && this.canItemsBeGrouped(item, sibling));
   // }
 
-  findGroupSiblingByItem(item: GroupItem, items: GroupItem[]) {
-    items = items.slice();
-    const idx = this.insertItemToArray(item, items);
-    // return this.findGroupSiblingInSiblings(item, this.getSiblingsAtIndex(idx, items));
-    return this.findGroupSiblingInItems(item, items, idx);
-  }
-
   findGroupSiblingInItems(item: GroupItem, items: GroupItem[], index = items.indexOf(item), length = items.length) {
     const previousItem = items[index - 1];
     let siblingGroupedItem: GroupItem;
@@ -620,11 +695,13 @@ export default class BubbleGroups {
     } else {
       for(let k = index + 1; k < length; ++k) {
         const nextItem = items[k];
-        if(this.canItemsBeGrouped(item, nextItem)) {
-          if(nextItem.group) {
-            siblingGroupedItem = nextItem;
-          }
-        } else {
+        if(!this.canItemsBeGrouped(item, nextItem)) {
+          break;
+        }
+
+        // the nearest group: one further away would put the item past the group in between
+        if(nextItem.group) {
+          siblingGroupedItem = nextItem;
           break;
         }
       }
@@ -639,11 +716,23 @@ export default class BubbleGroups {
   }
 
   insertItemToArray(item: GroupItem, array: GroupItem[]) {
-    return insertSomething(array, item, this.sortItemsKey, this.reverse = item.reverse);
+    return insertSomething(
+      array,
+      item,
+      this.sortItemsKey,
+      this.reverse = item.reverse,
+      this.compareItems
+    );
   }
 
   insertGroup(group: BubbleGroup) {
-    const idx = insertSomething(this.groups, group, this.sortGroupsKey, this.reverse);
+    const idx = insertSomething(
+      this.groups,
+      group,
+      this.sortGroupsKey,
+      this.reverse,
+      this.compareGroups
+    );
     // this.updateGroupsClassNames();
     return idx;
   }
@@ -702,10 +791,107 @@ export default class BubbleGroups {
       mounted: false,
       single,
       message,
-      reverse
+      reverse,
+      timelineKey: makeBubbleTimelineKey(message, mid, dateTimestamp, this.getTimelinePosition(message, mid))
     };
 
     return item;
+  }
+
+  private getTimelinePosition(message: MyMessage | AdminLog, mid: number) {
+    let position = this.positions.get(mid);
+    if(position === undefined && this.compareItems) {
+      position = isPendingTimelineMessage(message) ?
+        this.getLateSendPosition(mid) :
+        isEphemeralMessage(message) ? this.getEphemeralPosition(message.date) : undefined;
+      if(position !== undefined) {
+        this.positions.set(mid, position);
+      }
+    }
+
+    return position ?? mid;
+  }
+
+  /**
+   * Where a send still on its way goes when its bubble comes in after an earlier send has taken its server id
+   * (`ChatBubbles.changedMids`): behind that one, where `raiseLaterSends` would have put it had the bubble been
+   * in by then. Sends follow so fast that this is common: a bubble rendered at its temporary id above the
+   * earlier one, then moved, made the chat jump.
+   */
+  private getLateSendPosition(mid: number) {
+    let sentPosition: number;
+    for(const [tempMid, sentMid] of this.chat.bubbles.changedMids) {
+      if(tempMid < mid && sentMid > mid && (sentPosition === undefined || sentMid > sentPosition)) {
+        sentPosition = sentMid;
+      }
+    }
+
+    return sentPosition === undefined ? undefined : sentPosition + BEHIND_SENT;
+  }
+
+  /**
+   * Where an ephemeral message dated `date` goes: right after the newest message dated no later, or right
+   * before the oldest one rendered when they are all later. The place is kept once the bubble is in, so
+   * history that comes later is ordered around it as it arrives, the way desktop appends it.
+   */
+  private getEphemeralPosition(date: number) {
+    let oldest: GroupItem;
+    for(const item of this.itemsArr) { // newest first
+      const key = item.timelineKey;
+      if(key.ephemeral) {
+        continue;
+      }
+
+      if(item.timestamp <= date) {
+        return key.position;
+      }
+
+      oldest = item;
+    }
+
+    return oldest ? oldest.timelineKey.position - 0.5 : 0;
+  }
+
+  /**
+   * A send took its server id, `position`. The sends made after it get higher ones, so the ones still on their
+   * way move behind it now rather than stay above it at their temporary ids — the screen keeps the order
+   * they were sent in. Returns the items to move.
+   */
+  raiseLaterSends(sent: BubbleTimelineKey, position: number) {
+    if(!this.compareItems) {
+      return [];
+    }
+
+    const later = this.itemsArr.filter(({timelineKey: key}) => {
+      return key.pending && key.mid > sent.mid && key.position < position;
+    }).reverse(); // in the order they stand
+
+    for(const item of later) {
+      this.positions.set(item.timelineKey.mid, position + BEHIND_SENT);
+    }
+
+    return later;
+  }
+
+  /**
+   * The ephemeral messages filed right after an item that moved from `from` to `to` keep following it while
+   * it is dated no later than they are, `date` (a bot's answer stays under the command it answers). Returns
+   * the items to move.
+   */
+  takeEphemeralFollowers(from: number, to: number, date: number) {
+    if(!this.compareItems) {
+      return [];
+    }
+
+    const followers = this.itemsArr.filter((item) => {
+      return item.timelineKey.ephemeral && item.timelineKey.position === from && date <= item.timestamp;
+    });
+
+    for(const item of followers) {
+      this.positions.set(item.timelineKey.mid, to);
+    }
+
+    return followers;
   }
 
   splitSiblingsOnGrouping(siblings: ReturnType<BubbleGroups['getSiblingsAtIndex']>) {
@@ -863,6 +1049,7 @@ export default class BubbleGroups {
     this.itemsArr = [];
     this.groups = [];
     this.itemsMap.clear();
+    this.positions.clear();
   }
 
   // findIncorrentPositions() {

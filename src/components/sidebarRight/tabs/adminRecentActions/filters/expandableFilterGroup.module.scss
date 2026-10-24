@@ -11,7 +11,11 @@
   &Checkbox {
     margin: 0;
     display: inline-flex;
-    pointer-events: none;
+
+    // Without the keyboard layer the row takes the click and the checkbox only shows the state.
+    &Passive {
+      pointer-events: none;
+    }
 
     &Wrapper {
       position: relative;
@@ -19,7 +23,7 @@
       padding: var(--padding);
     }
 
-    &CickArea {
+    &ClickArea {
       position: absolute;
       inset: 0;
     }
@@ -28,13 +32,16 @@
   &Separator {
     height: 1.5em;
     width: 1px;
-    margin-right: var(--padding);
+    margin-inline-end: var(--padding);
     background-color: rgba(var(--secondary-text-color-rgb), 0.25);
   }
 
   &Label {
-    padding: var(--padding);
-    padding-left: 0;
+    color: inherit;
+    text-align: inherit;
+    cursor: pointer;
+    padding-block: var(--padding);
+    padding-inline: 0 var(--padding);
     flex: 1;
     display: flex;
     align-items: center;
@@ -43,7 +50,7 @@
   }
 
   &Offset {
-    padding-left: 20px;
+    padding-inline-start: 20px;
   }
 }
 

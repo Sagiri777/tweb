@@ -32,6 +32,16 @@ html.overlay-scroll {
     scrollbar-color: var(--scrollbar-color) rgba(0, 0, 0, 0);
   }
 
+  // * the hover's colour is for the scrollable's own scrollbar, and goes no further: `scrollbar-color`
+  // * is inherited, and everything inside - a whole chat, its every bubble laid out again - was worked
+  // * out anew each time the pointer came in or left (opening a context menu too). Firefox hides the
+  // * scrollbars inside by that inheritance (`.is-firefox .scrollable-y`), and keeps it. A universal
+  // * child: what a scrollable holds is anyone's markup, and one parent's class is all it checks;
+  // * `:where` leaves a hovered scrollable inside its own colour
+  &:not(.is-firefox) :where(.scrollable > *) {
+    scrollbar-color: auto;
+  }
+
   .scrollable:hover::-webkit-scrollbar {
     opacity: 1; // for safari
   }
@@ -125,20 +135,27 @@ html.custom-scroll {
       transform: translateZ(0);
     }
 
+    // each side is opted into on its own — a scroll with nothing above it wants no top border,
+    // and one with nothing below it no bottom border. The colour then follows the scroll position.
     &.scrollable-y-bordered {
-      border-top: 1px solid transparent;
-      border-bottom: 1px solid transparent;
-
-      @include animation-level(2) {
+      @include animation-level(1) {
         transition: border-top-color var(--transition-standard-in), border-bottom-color var(--transition-standard-in);
       }
 
-      &:not(.scrolled-start) {
-        border-top-color: var(--border-color);
+      &-top {
+        border-top: 1px solid transparent;
+
+        &:not(.scrolled-start) {
+          border-top-color: var(--border-color);
+        }
       }
 
-      &:not(.scrolled-end) {
-        border-bottom-color: var(--border-color);
+      &-bottom {
+        border-bottom: 1px solid transparent;
+
+        &:not(.scrolled-end) {
+          border-bottom-color: var(--border-color);
+        }
       }
     }
 
@@ -172,7 +189,7 @@ html.custom-scroll {
     border-radius: $border-radius;
     // z-index: 5;
 
-    @include animation-level(2) {
+    @include animation-level(1) {
       transition: opacity .1s ease-in-out;
     }
 

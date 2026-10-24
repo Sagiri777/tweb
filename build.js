@@ -10,6 +10,10 @@ const zlib = require('zlib');
 const npmCmd = /^win/.test(process.platform) ? 'npm.cmd' : 'npm';
 const publicPath = path.join(__dirname, 'public');
 const distPath = path.join(__dirname, 'dist');
+const obsoleteAssets = new Set([
+  'rlottie-wasm.js',
+  'rlottie-wasm.wasm'
+]);
 
 function readSSHConfig() {
   let sshConfig;
@@ -44,6 +48,11 @@ function clearOldFiles() {
   const bundleFiles = fs.readdirSync(distPath);
   const files = fs.readdirSync(publicPath, {withFileTypes: true});
   files.forEach((file) => {
+    if(file.isFile() && obsoleteAssets.has(file.name)) {
+      fs.unlinkSync(path.join(publicPath, file.name));
+      return;
+    }
+
     if(file.isDirectory() ||
       bundleFiles.some((bundleFile) => bundleFile === file.name) ||
       keepAsset(file.name)) {
@@ -75,6 +84,7 @@ function changeVersion(langVersion) {
 
 function applyNewLang() {
   const child = spawn(npmCmd, ['run', 'apply-new-lang'], {shell: true});
+  child.stderr.pipe(process.stderr);
   let data = '';
   child.stdout.on('data', (chunk) => {
     data += chunk.toString();
@@ -98,7 +108,7 @@ function formatLang() {
     console.log(chunk.toString());
   });
 
-  return new Promise((resolve, reject) => { 
+  return new Promise((resolve, reject) => {
     child.on('close', (code) => {
       if(code != 0) {
         reject(new Error('Failed to format lang'));
@@ -191,19 +201,18 @@ formatLang()
   console.error('Failed to apply new lang');
   return changeVersion('same');
 }).then(() => {
-  const child = spawn(npmCmd, ['run', 'build'], {shell: true});
+  // * the full test run before the build goes ahead of every run waiting in the machine's test queue
+  const child = spawn(npmCmd, ['run', 'build'], {shell: true, env: {...process.env, TWEB_TEST_QUEUE_PRIORITY: '1'}});
   child.stdout.on('data', (chunk) => {
     console.log(chunk.toString());
   });
 
-  let error = '';
-  child.stderr.on('data', (chunk) => {
-    error += chunk.toString();
-  });
+  // * as it comes: a build waiting for its turn in the test queue says so on stderr
+  child.stderr.pipe(process.stderr);
 
   child.on('close', (code) => {
     if(code != 0) {
-      console.error(error, `build child process exited with code ${code}`);
+      console.error(`build child process exited with code ${code}`);
     } else {
       onCompiled();
     }

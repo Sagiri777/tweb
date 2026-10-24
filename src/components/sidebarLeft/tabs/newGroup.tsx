@@ -1,13 +1,13 @@
 import {Component, onCleanup, onMount} from 'solid-js';
 import {MissingInvitee} from '@layer';
-import appDialogsManager from '@lib/appDialogsManager';
 import InputField from '@components/inputField';
 import AvatarEdit, {AvatarEditPayload} from '@components/avatarEdit';
 import I18n, {i18n} from '@lib/langPack';
 import ButtonCorner from '@components/buttonCorner';
 import getUserStatusString from '@components/wrappers/getUserStatusString';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
-import SettingSection from '@components/settingSection';
+import Section from '@components/section';
+import {unwrapSolidElement} from '@helpers/solid/wrapSolidComponent';
 import {handleMissingInvitees} from '@components/addChatUsers';
 import type {AppChatsManager} from '@lib/appManagers/appChatsManager';
 import {handleChannelsTooMuch} from '@components/popups/channelsTooMuch';
@@ -16,6 +16,7 @@ import {useSuperTab} from '@components/solidJsTabs/superTabProvider';
 import {usePromiseCollector} from '@components/solidJsTabs/promiseCollector';
 import {useHotReloadGuard} from '@lib/solidjs/hotReloadGuard';
 import type {AppNewGroupTab} from '@components/solidJsTabs/tabs';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 interface OpenStreetMapInterface {
   place_id?: number;
@@ -56,7 +57,7 @@ const NewGroup: Component = () => {
     canBeEdited: false
   });
 
-  const list = appDialogsManager.createChatList({
+  const list = hotReloadGuard.appDialogsManager.createChatList({
     new: true
   });
 
@@ -91,8 +92,6 @@ const NewGroup: Component = () => {
   onMount(() => {
     tab.container.classList.add('new-group-container');
 
-    const section = new SettingSection({});
-
     const inputWrapper = document.createElement('div');
     inputWrapper.classList.add('input-wrapper');
 
@@ -108,7 +107,7 @@ const NewGroup: Component = () => {
       nextBtn.classList.toggle('is-visible', !!valueCheck);
     });
 
-    nextBtn = ButtonCorner({icon: 'arrow_next'});
+    nextBtn = ButtonCorner({icon: 'arrow_next', ariaLabel: 'Next'});
 
     attachClickEvent(nextBtn, () => {
       const groupTitle = groupNameInputField.value;
@@ -184,32 +183,36 @@ const NewGroup: Component = () => {
         return;
       }
 
-      promise.then(({chatId, missingInvitees}) => {
-        onCreate?.(chatId);
+      promise.then(async({chatId, missingInvitees}) => {
+        await onCreate?.(chatId);
         tab.close();
         if(openAfter) appImManager.setInnerPeer({peerId: chatId.toPeerId(true)});
         handleMissingInvitees(chatId, missingInvitees);
-      }, (err) => {
+      }).catch((err) => {
         console.error('createGroup error', err);
         toggle();
       });
     }, {listenerSetter: tab.listenerSetter});
 
-    const chatsSection = new SettingSection({
-      name: 'Members',
-      nameArgs: [peerIds.length]
-    });
+    const section = unwrapSolidElement(
+      <Section>
+        {avatarEdit.container}
+        {inputWrapper}
+      </Section>
+    ) as HTMLElement;
 
-    if(!peerIds.length) {
-      chatsSection.container.classList.add('hide');
-    }
-
-    chatsSection.content.append(list);
-
-    section.content.append(avatarEdit.container, inputWrapper);
+    const chatsSection = unwrapSolidElement(
+      <Section
+        class={!peerIds.length ? 'hide' : undefined}
+        name="Members"
+        nameArgs={[peerIds.length]}
+      >
+        {list}
+      </Section>
+    ) as HTMLElement;
 
     tab.content.append(nextBtn);
-    tab.scrollable.append(section.container, chatsSection.container);
+    tab.scrollable.append(section, chatsSection);
 
     if(isGeoChat) {
       tab.title.replaceChildren(i18n('NearbyCreateGroup'));
@@ -225,7 +228,7 @@ const NewGroup: Component = () => {
 
     const a = usersPromise.then((users) => {
       users.forEach((user) => {
-        const {dom} = appDialogsManager.addDialogNew({
+        const {dom} = hotReloadGuard.appDialogsManager.addDialogNew({
           peerId: user.id.toPeerId(false),
           container: list,
           rippleEnabled: false,

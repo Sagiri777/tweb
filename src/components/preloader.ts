@@ -5,14 +5,15 @@ import cancelEvent from '@helpers/dom/cancelEvent';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
 import isInDOM from '@helpers/dom/isInDOM';
 import safeAssign from '@helpers/object/safeAssign';
+import PreloaderRing from '@components/preloaderRing';
 
 const TRANSITION_TIME = 200;
 
 export default class ProgressivePreloader {
   public preloader: HTMLDivElement;
+  // the old spinner's circle; a cancelable progress is a ring of dots instead
   public circle: SVGCircleElement;
-  private cancelSvg: SVGSVGElement;
-  private downloadSvg: HTMLElement;
+  public ring: PreloaderRing;
 
   private tempId = 0;
   public detached = true;
@@ -90,6 +91,10 @@ export default class ProgressivePreloader {
           <div class="loading"></div>
         </div>
       </div>`;
+    } else if(this.cancelable && !this.streamable) {
+      this.ring = new PreloaderRing(this.preloader);
+      attachClickEvent(this.preloader, this.onClick);
+      return;
     } else {
       this.preloader.innerHTML = `
       <div class="you-spin-me-round">
@@ -119,9 +124,6 @@ export default class ProgressivePreloader {
           <path fill="#000" fill-rule="nonzero" d="M5,19 L19,19 C19.5522847,19 20,19.4477153 20,20 C20,20.5128358 19.6139598,20.9355072 19.1166211,20.9932723 L19,21 L5,21 C4.44771525,21 4,20.5522847 4,20 C4,19.4871642 4.38604019,19.0644928 4.88337887,19.0067277 L5,19 L19,19 L5,19 Z M11.8833789,3.00672773 L12,3 C12.5128358,3 12.9355072,3.38604019 12.9932723,3.88337887 L13,4 L13,13.585 L16.2928932,10.2928932 C16.6533772,9.93240926 17.2206082,9.90467972 17.6128994,10.2097046 L17.7071068,10.2928932 C18.0675907,10.6533772 18.0953203,11.2206082 17.7902954,11.6128994 L17.7071068,11.7071068 L12.7071068,16.7071068 C12.3466228,17.0675907 11.7793918,17.0953203 11.3871006,16.7902954 L11.2928932,16.7071068 L6.29289322,11.7071068 C5.90236893,11.3165825 5.90236893,10.6834175 6.29289322,10.2928932 C6.65337718,9.93240926 7.22060824,9.90467972 7.61289944,10.2097046 L7.70710678,10.2928932 L11,13.585 L11,4 C11,3.48716416 11.3860402,3.06449284 11.8833789,3.00672773 L12,3 L11.8833789,3.00672773 Z"/>
         </g>
       </svg>`;
-
-      this.downloadSvg = this.preloader.lastElementChild as HTMLElement;
-      this.cancelSvg = this.downloadSvg.previousElementSibling as any;
     } else {
       this.preloader.classList.add('preloader-swing');
     }
@@ -145,19 +147,34 @@ export default class ProgressivePreloader {
     }
   };
 
+  /**
+   * Resolves once the indicator has caught up with the end of the transfer: the ring's line comes round
+   * to the end first. For a place that hides it as soon as the file is in (a file's icon, an audio's
+   * button) to wait for, as the media's own detach does.
+   */
+  public whenCaughtUp() {
+    return this.ring ? this.ring.finish() : Promise.resolve();
+  }
+
   public setDownloadFunction(func: ProgressivePreloader['loadFunc']) {
     this.loadFunc = func;
   }
 
   public setManual() {
     this.preloader.classList.add('manual');
+    this.ring?.setManual(true, this.isShown());
     this.setProgress(0);
+  }
+
+  private isShown() {
+    return isInDOM(this.preloader) && this.preloader.classList.contains('is-visible');
   }
 
   public attachPromise(promise: CancellablePromise<any>) {
     if(this.isUpload && this.promise) return;
 
     this.promise = promise;
+    this.ring?.begin();
 
     const tempId = --this.tempId;
     const startTime = Date.now();
@@ -178,8 +195,15 @@ export default class ProgressivePreloader {
 
         const delay = TRANSITION_TIME * 0.75;
 
-        if(elapsedTime < delay) {
+        // * pressed, the arrow turning into the ring plays out even for a file that comes at once
+        if(elapsedTime < delay && !this.ring?.isChanging()) {
           this.detach();
+        } else if(this.ring) { // * the line comes round to the end first
+          this.ring.finish().then(() => {
+            if(tempId === this.tempId) {
+              this.detach();
+            }
+          });
         } else {
           setTimeout(() => { // * wait for transition complete
             if(tempId === this.tempId) {
@@ -218,15 +242,23 @@ export default class ProgressivePreloader {
     });
   }
 
-  public attach(elem: Element, reset = false, promise?: CancellablePromise<any>) {
+  public attach(
+    elem: Element,
+    reset = false,
+    promise?: CancellablePromise<any>,
+    transitionDuration = TRANSITION_TIME
+  ) {
     if(!this.detached && (!this.preloader || !this.preloader.classList.contains('manual'))) {
       return;
     }
 
     this.construct?.();
 
-    if(this.preloader.parentElement) {
+    // * pressed: a new download makes the arrow the ring; shown again without one (a try that failed
+    // * puts the arrow back a frame later) the ring keeps its arrow
+    if(this.preloader.parentElement && this.preloader.classList.contains('manual') && (!this.ring || promise)) {
       this.preloader.classList.remove('manual');
+      this.ring?.setManual(false, this.isShown());
     }
 
     this.detached = false;
@@ -247,9 +279,10 @@ export default class ProgressivePreloader {
       element: this.preloader,
       className: 'is-visible',
       forwards: true,
-      duration: TRANSITION_TIME,
+      duration: transitionDuration,
       useRafs
     });
+    this.ring?.onAttach();
 
     if(this.cancelable && reset) {
       this.setProgress(0);
@@ -285,6 +318,7 @@ export default class ProgressivePreloader {
         duration: TRANSITION_TIME,
         onTransitionEnd: () => {
           this.preloader.remove();
+          this.ring?.halt();
         },
         useRafs: 1
       });
@@ -294,6 +328,11 @@ export default class ProgressivePreloader {
   }
 
   public setProgress(percents: number) {
+    if(this.ring) {
+      this.ring.setTarget(percents / 100);
+      return;
+    }
+
     if(!this.totalLength && !isInDOM(this.circle)) {
       return;
     }

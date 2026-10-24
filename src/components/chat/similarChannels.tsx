@@ -1,5 +1,5 @@
 import {createEffect, createSignal, JSX, For, untrack, Accessor, onCleanup, Ref, createMemo} from 'solid-js';
-import {i18n} from '@lib/langPack';
+import I18n, {i18n} from '@lib/langPack';
 import rootScope from '@lib/rootScope';
 import {AvatarNew} from '@components/avatarNew';
 import PeerTitle from '@components/peerTitle';
@@ -11,10 +11,7 @@ import classNames from '@helpers/string/classNames';
 import cancelEvent from '@helpers/dom/cancelEvent';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
 import findUpClassName from '@helpers/dom/findUpClassName';
-import PopupPremium from '@components/popups/premium';
-import appImManager from '@lib/appImManager';
 import anchorCallback from '@helpers/dom/anchorCallback';
-import PopupElement from '@components/popups';
 import showPickUserPopup from '@components/popups/pickUser';
 import apiManagerProxy from '@lib/apiManagerProxy';
 import {ButtonIconTsx} from '@components/buttonIconTsx';
@@ -22,6 +19,9 @@ import {IconTsx} from '@components/iconTsx';
 import createMiddleware from '@helpers/solid/createMiddleware';
 import showTooltip from '@components/tooltip';
 import {usePeer} from '@stores/peers';
+import buttonKeyDown from '@helpers/solid/buttonKeyDown';
+import Modes from '@config/modes';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 let canvas: HTMLCanvasElement, context: CanvasRenderingContext2D;
 export function SimilarPeer(props: {
@@ -119,6 +119,9 @@ export function SimilarPeer(props: {
   return (
     <div
       class={classNames('similar-channels-channel', props.isLast && 'is-last', !displayBadge() && 'no-badge')}
+      role="button"
+      tabindex={Modes.a11y ? 0 : undefined}
+      onKeyDown={buttonKeyDown}
       ref={props.ref}
     >
       {props.isLast ? (
@@ -207,7 +210,7 @@ export default function SimilarChannels(props: {
     const promises: Promise<any>[] = [];
     let ref: HTMLDivElement;
     const list = (
-      <div ref={ref} class="similar-channels-list">
+      <div ref={ref} class="similar-channels-list" role="group" aria-label={I18n.format('SimilarChannels', true)}>
         <For each={(messagesChats.chats as Chat.channel[]).slice(0, defaultLimit)}>
           {(chat, idx) => {
             const isLast = hasMore && idx() === defaultLimit - 1;
@@ -237,14 +240,14 @@ export default function SimilarChannels(props: {
       cancelEvent(e);
       const chat = rendered.get(target);
       if(chat) {
-        appImManager.setInnerPeer({peerId: chat.id.toPeerId(true)});
+        hotReloadGuard.appImManager.setInnerPeer({peerId: chat.id.toPeerId(true)});
         return;
       }
 
       if(premium()) {
         showPickUserPopup({
           onSelect: ([first]) => {
-            appImManager.setInnerPeer(first);
+            hotReloadGuard.appImManager.setInnerPeer(first);
           },
           peerType: ['custom'],
           getMoreCustom: async() => {
@@ -261,7 +264,7 @@ export default function SimilarChannels(props: {
 
       const anchor = anchorCallback(() => {
         close();
-        PopupPremium.show();
+        hotReloadGuard.showPremiumPopup();
       });
       anchor.classList.add('primary');
 
@@ -272,8 +275,8 @@ export default function SimilarChannels(props: {
         textElement: i18n(
           'SimilarChannels.Unlock',
           [
-            anchor,
-            premiumLimit
+            premiumLimit,
+            anchor
           ]
         ),
         icon: 'star'
@@ -298,7 +301,7 @@ export default function SimilarChannels(props: {
       </svg>
       <div class="similar-channels-header">
         {i18n('SimilarChannels')}
-        <ButtonIconTsx icon="close" onClick={props.onClose} />
+        <ButtonIconTsx icon="close" aria-label={I18n.format('Close', true)} onClick={props.onClose} />
       </div>
       <Scrollable axis="x">
         <div class="similar-channels-list-margin"></div>

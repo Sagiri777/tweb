@@ -5,7 +5,7 @@ import tryPatchMp4 from '@helpers/fixChromiumMp4';
 import debounce, {DebounceReturnType} from '@helpers/schedulers/debounce';
 import pause from '@helpers/schedulers/pause';
 import {InputFileLocation} from '@layer';
-import {getCurrentAccountFromURL} from '@lib/accounts/getCurrentAccountFromURL';
+import getClientAccount from '@lib/serviceWorker/clientAccounts';
 import {ActiveAccountNumber} from '@lib/accounts/types';
 import CacheStorageController from '@lib/files/cacheStorage';
 import {DownloadOptions, MyUploadFile} from '@appManagers/apiFileManager';
@@ -39,6 +39,17 @@ setInterval(() => {
 
 type StreamRange = [number, number];
 type StreamId = `${ActiveAccountNumber}-${DocId}`;
+
+// The mime type is read out of the request URL, so it is fully attacker-controlled:
+// echoing it back would let file bytes be served as markup from the app origin, where
+// script can read the auth keys. This endpoint only ever serves streamable media
+// (getDocumentURL picks it for doc.supportsStreaming), so anything else is handed to
+// the browser as an opaque download instead.
+const STREAMABLE_MIME_TYPE = /^(?:video|audio|image)\/[\w.+-]+$/;
+
+function safeContentType(mimeType: string) {
+  return STREAMABLE_MIME_TYPE.test(mimeType) ? mimeType : 'application/octet-stream';
+}
 
 const streams: Map<StreamId, Stream> = new Map();
 (ctx as any).streams = streams;
@@ -264,7 +275,8 @@ class Stream {
       };
 
       if(this.info.mimeType) {
-        headers['Content-Type'] = this.info.mimeType;
+        headers['Content-Type'] = safeContentType(this.info.mimeType);
+        headers['X-Content-Type-Options'] = 'nosniff';
       }
 
       // simulate slow connection
@@ -308,13 +320,21 @@ function parseInfo(params: string) {
 }
 
 export default function onStreamFetch(event: FetchEvent, params: string, search: string) {
+  // Media elements fetch with mode 'cors'/'no-cors'; a navigation or an iframe from
+  // another origin is never a legitimate way into this endpoint, and it is the only
+  // way its response could be rendered as a document.
+  if(event.request.mode === 'navigate') {
+    event.respondWith(new Response('', {status: 403, statusText: 'Forbidden'}));
+    return;
+  }
+
   async function performRequest() {
     const range = parseRange(event.request.headers.get('Range'));
     const info = parseInfo(params);
 
     const client = await ctx.clients.get(event.clientId);
     // Theoretically should never happen otherwise
-    if(client?.type === 'window') info.accountNumber = getCurrentAccountFromURL(client.url);
+    if(client?.type === 'window') info.accountNumber = await getClientAccount(client);
 
     const stream = Stream.get(info);
 

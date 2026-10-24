@@ -1,17 +1,17 @@
-import appImManager, {APP_TABS} from '@lib/appImManager';
+import appImManager from '@lib/appImManager';
 import SidebarSlider from '@components/slider';
 import mediaSizes, {ScreenSize} from '@helpers/mediaSizes';
 import AppSharedMediaTab from '@components/sidebarRight/tabs/sharedMediaTab';
 import {MOUNT_CLASS_TO} from '@config/debug';
-import {AppManagers} from '@lib/managers';
+import {TabManagers} from '@lib/managers';
 import appNavigationController from '@components/appNavigationController';
 import rootScope from '@lib/rootScope';
 import {installColumnWidthsUpdater} from '@helpers/updateColumnWidths';
 import installColumnResize from '@helpers/installColumnResize';
 import animationIntersector from '@components/animationIntersector';
+import {APP_TABS, RIGHT_COLUMN_ACTIVE_CLASSNAME} from '@lib/appColumns';
+import {registerHotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
-
-export const RIGHT_COLUMN_ACTIVE_CLASSNAME = 'is-right-column-shown';
 
 export class AppSidebarRight extends SidebarSlider {
   public sharedMediaTab: AppSharedMediaTab;
@@ -23,9 +23,11 @@ export class AppSidebarRight extends SidebarSlider {
       canHideFirst: true,
       navigationType: 'right'
     });
+
+    this.sidebarEl.inert = !document.body.classList.contains(RIGHT_COLUMN_ACTIVE_CLASSNAME);
   }
 
-  construct(managers: AppManagers) {
+  construct(managers: TabManagers) {
     this.managers = managers;
 
     mediaSizes.addEventListener('changeScreen', (from, to) => {
@@ -72,7 +74,9 @@ export class AppSidebarRight extends SidebarSlider {
 
         previousTab.container.remove();
       }
-    } else {
+    } else if(tab) {
+      // both undefined means there is nothing to remove and nothing to mount — reaching for
+      // `tab.container` here threw, and the throw aborted whatever peer change was running
       this.tabsContainer.prepend(tab.container);
     }
 
@@ -88,12 +92,17 @@ export class AppSidebarRight extends SidebarSlider {
   }
 
   public hide() {
+    this.sidebarEl.inert = true;
     document.body.classList.remove(RIGHT_COLUMN_ACTIVE_CLASSNAME);
     appNavigationController.removeByType('right');
     // The column is hidden with a transform (stays mounted), so pause any video
     // avatars playing inside it — the IntersectionObserver won't catch the move.
     animationIntersector.toggleVideosUnder(this.sidebarEl, true);
     rootScope.dispatchEventSingle('right_sidebar_toggle', false);
+  }
+
+  public reveal() {
+    this.toggleSidebar(true);
   }
 
   public toggleSidebar(enable?: boolean, animate?: boolean) {
@@ -121,6 +130,7 @@ export class AppSidebarRight extends SidebarSlider {
     if(!enable) this.hide();
     else {
       document.body.classList.add(RIGHT_COLUMN_ACTIVE_CLASSNAME);
+      this.sidebarEl.inert = false;
       if(!appNavigationController.findItemByType('right')) {
         this.pushNavigationItem(this.sharedMediaTab);
       }
@@ -129,52 +139,13 @@ export class AppSidebarRight extends SidebarSlider {
       rootScope.dispatchEventSingle('right_sidebar_toggle', true);
     }
     return animationPromise;
-
-    /* return new Promise((resolve, reject) => {
-      const hidden: {element: HTMLDivElement, height: number}[] = [];
-      const observer = new IntersectionObserver((entries) => {
-        for(const entry of entries) {
-          const bubble = entry.target as HTMLDivElement;
-          if(!entry.isIntersecting) {
-            hidden.push({element: bubble, height: bubble.scrollHeight});
-          }
-        }
-
-        for(const item of hidden) {
-          item.element.style.minHeight = item.height + 'px';
-          (item.element.firstElementChild as HTMLElement).style.display = 'none';
-          item.element.style.width = '1px';
-        }
-
-        //console.log('hidden', hidden);
-        observer.disconnect();
-
-        set();
-
-        setTimeout(() => {
-          for(const item of hidden) {
-            item.element.style.minHeight = '';
-            item.element.style.width = '';
-            (item.element.firstElementChild as HTMLElement).style.display = '';
-          }
-
-          resolve();
-        }, 200);
-      });
-
-      const length = Object.keys(appImManager.bubbles).length;
-      if(length) {
-        for(const i in appImManager.bubbles) {
-          observer.observe(appImManager.bubbles[i]);
-        }
-      } else {
-        set();
-        setTimeout(resolve, 200);
-      }
-    }); */
   }
 }
 
+// made once: a hot update keeps it and moves it onto the edited class (see @helpers/hotRegistry)
 const appSidebarRight = new AppSidebarRight();
 MOUNT_CLASS_TO.appSidebarRight = appSidebarRight;
+registerHotReloadGuard({appSidebarRight});
 export default appSidebarRight;
+
+if(import.meta.hot) import.meta.hot.accept();

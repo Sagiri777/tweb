@@ -3,6 +3,7 @@ import {unwrap} from 'solid-js/store';
 import {Transition} from 'solid-transition-group';
 import contextMenuController from '@helpers/contextMenuController';
 import {CLICK_EVENT_NAME} from '@helpers/dom/clickEvent';
+import getInlineArrowKeys from '@helpers/dom/getInlineArrowKeys';
 import noop from '@helpers/noop';
 import createMiddleware from '@helpers/solid/createMiddleware';
 import {Dialog} from '@layer';
@@ -19,6 +20,7 @@ import showTooltip from '@components/tooltip';
 import kindaFuzzyFinder from '@components/addToFolderDropdownMenu/kindaFuzzyFinder';
 import styles from '@components/addToFolderDropdownMenu/styles.module.scss';
 import {addToFilter, highlightTextNodes, log, removeFromFilter, wrapFolderTitleInSpan} from '@components/addToFolderDropdownMenu/utils';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 
 const MIN_FUZZY_SCORE = 0.25;
@@ -50,12 +52,7 @@ export const createButtonMenuIcon = ({filter, isChecked, docId, emoji}: CreateBu
           dontAnimate={filter.pFlags?.title_noanimate}
         />
       </Show>
-      <Transition
-        enterActiveClass={styles.AppearZoomEnterActive}
-        exitActiveClass={styles.AppearZoomEnterActive}
-        enterClass={styles.AppearZoomEnter}
-        exitToClass={styles.AppearZoomExitTo}
-      >
+      <Transition name='t-zoom'>
         <Show when={isChecked()}>
           <span class={styles.ItemIconCheck}>
             <IconTsx icon='check' />
@@ -103,7 +100,7 @@ export const createFolderItems = ({filters, isInFilter, isSelected, onToggle, cu
 
   return filters().map((filter) => {
     const extractedTitle = extractEmojiFromFilterTitle(filter.title);
-    const {span, charSpansGroups} = wrapFolderTitleInSpan(extractedTitle.text, middleware.get());
+    const {span, charSpansGroups, rtl} = wrapFolderTitleInSpan(extractedTitle.text, middleware.get());
     span.classList.add(styles.ItemLabelText);
 
     const options: ButtonMenuItemOptions = {
@@ -120,6 +117,17 @@ export const createFolderItems = ({filters, isInFilter, isSelected, onToggle, cu
     }, true);
     options.element?.classList.add(styles.Item);
 
+    // a11y: each row toggles folder membership, so it is a menuitemcheckbox whose
+    // aria-checked tracks whether the dialog is in the folder; the visible check
+    // icon alone is otherwise invisible to assistive tech. Name from the title.
+    if(options.element) {
+      options.element.setAttribute('role', 'menuitemcheckbox');
+      if(span.textContent) options.element.setAttribute('aria-label', span.textContent);
+    }
+    createEffect(() => {
+      options.element?.setAttribute('aria-checked', '' + isInFilter(filter));
+    });
+
     createEffect(() => {
       if(!isSelected(filter.id)) return;
       options.element?.classList.add(styles.selected);
@@ -131,7 +139,8 @@ export const createFolderItems = ({filters, isInFilter, isSelected, onToggle, cu
       textContent: span.textContent,
       buttonMenuItem,
       element: options.element,
-      charSpansGroups
+      charSpansGroups,
+      rtl
     };
   });
 });
@@ -147,6 +156,7 @@ export const useToggleDialogInFilter = ({dialog, onNewDialog, isInFilter}: UseTo
   let hasRequestInProgress = false;
 
   return async(filter: MyDialogFilter) => {
+    const managers = bindManagersToSession(rootScope.managers);
     if(hasRequestInProgress || !filter) return;
 
     const unwrapped = unwrap(filter);
@@ -155,7 +165,7 @@ export const useToggleDialogInFilter = ({dialog, onNewDialog, isInFilter}: UseTo
 
     try {
       await (isInFilter(filter) ? removeFromFilter(unwrapped, dialog().peerId) : addToFilter(unwrapped, dialog().peerId));
-      const newDialog = await rootScope.managers.dialogsStorage.getAnyDialog(dialog().peerId);
+      const newDialog = await managers.dialogsStorage.getAnyDialog(dialog().peerId);
       if(!isDialog(newDialog)) return;
       onNewDialog(newDialog);
     } catch{} finally {
@@ -197,7 +207,7 @@ export const createSearchableFolders = ({folderItems, search, isSelected, setSel
         if(isSelected(src.filter.id)) src.element.scrollIntoView({block: 'center'});
       });
 
-      highlightTextNodes(src.charSpansGroups, finderResult.found);
+      highlightTextNodes(src.charSpansGroups, finderResult.found, src.rtl);
 
       return true;
     }
@@ -283,7 +293,9 @@ export const useInputKeydown = ({search, setSearch, selected, setSelected, selec
 
     if(typeof selected() !== 'number') return;
 
-    const increment = ['ArrowUp', 'ArrowLeft'].includes(e.code) ? -1 : ['ArrowDown', 'ArrowRight'].includes(e.code) ? 1 : 0;
+    // * the side arrows step along the line: the previous folder is towards its start
+    const inlineKeys = getInlineArrowKeys();
+    const increment = e.code === 'ArrowUp' || e.code === inlineKeys.previous ? -1 : e.code === 'ArrowDown' || e.code === inlineKeys.next ? 1 : 0;
     setSelected(prev => (prev + increment + visibleFoldersCount()) % visibleFoldersCount())
   };
 };

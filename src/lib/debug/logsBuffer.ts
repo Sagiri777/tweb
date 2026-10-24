@@ -23,7 +23,8 @@ const WANTS_STACK = LEVEL_ERROR | LEVEL_WARN;
 // them so the exported file stays plain text.
 const ANSI = /\x1b\[[0-9;]*m/g;
 
-export type LogSource = 'main' | 'mtproto' | 'sw';
+// * 'memory': memoryWatch's samples and records, merged in only by the export
+export type LogSource = 'main' | 'mtproto' | 'sw' | 'memory';
 
 export type LogEntry = {
   t: number; // Date.now() — absolute, so entries from different contexts merge
@@ -35,7 +36,7 @@ export type LogEntry = {
 };
 
 // Which context this module instance lives in. The MTProto SharedWorker is a
-// dedicated worker (IS_WEB_WORKER); leaf compute workers (crypto/rlottie/…) also
+// dedicated worker (IS_WEB_WORKER); leaf compute workers (crypto/lottie/…) also
 // match but their buffer is never collected, so the tag is only cosmetic there.
 export const SRC: LogSource = IS_SERVICE_WORKER ? 'sw' : IS_WEB_WORKER ? 'mtproto' : 'main';
 
@@ -49,9 +50,15 @@ const MAX_ARRAY = 64;
 const MAX_KEYS = 64;
 
 let enabled = DEBUG;
-const ring: LogEntry[] = new Array(RING_SIZE);
-let head = 0;
-let count = 0;
+
+type Ring = {entries: LogEntry[], head: number, count: number};
+const createRing = (): Ring => ({entries: new Array(RING_SIZE), head: 0, count: 0});
+
+// The networkers (`[…NET-2-C-0]`) log every ping, ack and resend: on their own they fill a ring in
+// minutes, so they get one of their own and can't push the updates/managers timeline out of the other
+const TRANSPORT_PREFIX = '-NET-';
+const appRing = createRing();
+const transportRing = createRing();
 
 function bounded(s: string, max: number) {
   return s.length > max ? s.slice(0, max) + `…(${s.length})` : s;
@@ -173,10 +180,19 @@ function trimStack(stack: string): string {
   return lines.slice(i).join('\n');
 }
 
-function pushEntry(e: LogEntry) {
-  ring[head] = e;
-  head = (head + 1) % RING_SIZE;
-  if(count < RING_SIZE) count++;
+function pushEntry(ring: Ring, e: LogEntry) {
+  ring.entries[ring.head] = e;
+  ring.head = (ring.head + 1) % RING_SIZE;
+  if(ring.count < RING_SIZE) ring.count++;
+}
+
+function getRingEntries(ring: Ring): LogEntry[] {
+  const out: LogEntry[] = new Array(ring.count);
+  const start = ring.count < RING_SIZE ? 0 : ring.head;
+  for(let i = 0; i < ring.count; ++i) {
+    out[i] = ring.entries[(start + i) % RING_SIZE];
+  }
+  return out;
 }
 
 /**
@@ -198,7 +214,7 @@ export function capture(level: LogTypes, prefix: string, args: any[]): void {
     if(level & WANTS_STACK) {
       entry.stack = trimStack(new Error().stack || '');
     }
-    pushEntry(entry);
+    pushEntry(prefix?.includes(TRANSPORT_PREFIX) ? transportRing : appRing, entry);
   } catch(err) {
     // Logging must never break the app it's logging.
   }
@@ -206,16 +222,18 @@ export function capture(level: LogTypes, prefix: string, args: any[]): void {
 
 /** Snapshot of this context's buffer, oldest-first. */
 export function getLogEntries(): LogEntry[] {
-  const out: LogEntry[] = new Array(count);
-  const start = count < RING_SIZE ? 0 : head;
-  for(let i = 0; i < count; ++i) {
-    out[i] = ring[(start + i) % RING_SIZE];
+  const app = getRingEntries(appRing);
+  const transport = getRingEntries(transportRing);
+  const out: LogEntry[] = new Array(app.length + transport.length);
+  for(let i = 0, a = 0, b = 0; i < out.length; ++i) {
+    out[i] = b >= transport.length || (a < app.length && app[a].t <= transport[b].t) ? app[a++] : transport[b++];
   }
   return out;
 }
 
 export function clearLogBuffer(): void {
-  head = count = 0;
+  appRing.head = appRing.count = 0;
+  transportRing.head = transportRing.count = 0;
 }
 
 export function setLogBufferEnabled(value: boolean): void {

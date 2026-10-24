@@ -1,6 +1,5 @@
 import {JSX, createSignal, For, createEffect, Accessor, onMount, createMemo, splitProps, on, Show, onCleanup} from 'solid-js';
 import Scrollable from '@components/scrollable2';
-import {createStoriesViewer} from '@components/stories/viewer';
 import styles from '@components/stories/list.module.scss';
 import mediaSizes from '@helpers/mediaSizes';
 import rootScope from '@lib/rootScope';
@@ -11,11 +10,9 @@ import I18n, {i18n} from '@lib/langPack';
 import createContextMenu from '@helpers/dom/createContextMenu';
 import findUpClassName from '@helpers/dom/findUpClassName';
 import {StoriesProvider, useStories} from '@components/stories/store';
-import appImManager from '@lib/appImManager';
-import appSidebarLeft from '@components/sidebarLeft';
-import {AppMyStoriesTab} from '@components/solidJsTabs/tabs';
 import {toastNew} from '@components/toast';
 import wrapPeerTitle from '@components/wrappers/peerTitle';
+import removeStoriesFromRecent from '@components/stories/removeFromRecent';
 import {ChatType} from '@components/chat/chatType';
 import {subscribeOn} from '@helpers/solid/subscribeOn';
 import {useCollapsable} from '@hooks/useCollapsable';
@@ -23,6 +20,10 @@ import createMiddleware from '@helpers/solid/createMiddleware';
 import ListenerSetter from '@helpers/listenerSetter';
 import {PeerTitleTsx} from '@components/peerTitleTsx';
 import showStoriesStealthModePopup from '@components/popups/storiesStealthMode';
+import buttonKeyDown from '@helpers/solid/buttonKeyDown';
+import Modes from '@config/modes';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
+import createStyleRule from '@helpers/dom/createStyleRule';
 
 const TEST_COUNT = 0;
 const ITEM_MARGIN = 0;
@@ -92,7 +93,7 @@ function _StoriesList(props: {
       return item?.querySelector('.avatar');
     });
 
-    createStoriesViewer({onExit, target});
+    hotReloadGuard.createStoriesViewer({onExit, target});
   });
 
   const onItemClick = (peer: PeerStories, e?: MouseEvent) => {
@@ -162,7 +163,8 @@ function _StoriesList(props: {
       }
 
       const translateX = distanceX * value;
-      const translate = `translateX(calc(var(--stories-additional-offset, 0px) * ${value} + ${translateX * (I18n.getIsRTL() ? -1 : 1)}px))`;
+      // * the distance is measured towards the inline end, the extra offset with it: both turn in RTL
+      const translate = `translateX(calc((var(--stories-additional-offset, 0px) * ${value} + ${translateX}px) * var(--reflect)))`;
       const scaleValue = 1 - (value * (1 - _scale));
       const scale = `scale(${scaleValue})`;
       cssProperties.transform = `${translate} ${scale}`;
@@ -186,6 +188,15 @@ function _StoriesList(props: {
 
     const isMyStory = peer.peerId === rootScope.myId;
 
+    const [ariaLabel, setAriaLabel] = createSignal(I18n.format('OpenStory', true));
+    if(isMyStory) {
+      setAriaLabel(`${I18n.format('OpenStory', true)}, ${I18n.format('MyStory', true)}`);
+    } else {
+      wrapPeerTitle({peerId: peer.peerId, onlyFirstName: true}).then((el) => {
+        setAriaLabel(`${I18n.format('OpenStory', true)}, ${el.textContent}`);
+      });
+    }
+
     const ret = (
       <div
         ref={(el) => (items.set(peer, el), itemsTarget.set(el, peer))}
@@ -197,6 +208,10 @@ function _StoriesList(props: {
             return movement && !movement.isOut && !movement.isLastIn;
           })()
         }}
+        role="button"
+        tabindex={Modes.a11y ? 0 : undefined}
+        aria-label={ariaLabel()}
+        onKeyDown={buttonKeyDown}
         onClick={onClick}
         style={{
           ...calculateMovement()?.cssProperties,
@@ -219,6 +234,14 @@ function _StoriesList(props: {
 
   const MOVE_Y = -69, CONTAINER_PADDING = 6, CONTAINER_HEIGHT = 92;
   let scrolling = false;
+  // * given to the boxes that move with it alone (_leftSidebar.scss): set on the list's container, it
+  // * restyled the whole chat list in every frame of the fold
+  let scrolledRule: ReturnType<typeof createStyleRule>, scrolledClassName: string;
+  onCleanup(() => {
+    scrolledRule?.remove();
+    scrolledClassName && props.setScrolledOn.classList.remove(scrolledClassName);
+  });
+
   const calculateMovement = (): JSX.CSSProperties => {
     const value = progress();
 
@@ -232,7 +255,13 @@ function _StoriesList(props: {
 
     const translateY = value * MOVE_Y;
     const translate = `translateY(${translateY}px)`;
-    props.setScrolledOn.style.setProperty('--stories-scrolled', (value * CONTAINER_HEIGHT) + 'px');
+    if(!scrolledRule) {
+      const className = scrolledClassName = 'stories-scrolled-' + Math.random().toString(36).slice(2);
+      props.setScrolledOn.classList.add(className);
+      scrolledRule = createStyleRule(props.setScrolledOn, `.${className} .connection-status-bottom, .${className} .sidebar-content`);
+    }
+
+    scrolledRule.set('--stories-scrolled', (value * CONTAINER_HEIGHT) + 'px');
 
     return {
       // 'height': `${containerHeight - (containerHeight * value)}px`,
@@ -309,6 +338,11 @@ function _StoriesList(props: {
     disableHoverWhenFolded: true
   });
 
+  // * declared before `r`: creating it maps `peers()` through `Item` right away, so a list
+  // * that already has its peers (a provider constructed with them) would read this memo
+  // * before initialization
+  const shouldStoriesSegmentsBeFolded = createMemo(() => progress() !== STATE_UNFOLDED);
+
   const r = (
     <div
       ref={container}
@@ -347,27 +381,27 @@ function _StoriesList(props: {
       });
     };
 
-    let peer: PeerStories, isSelf: boolean;
+    let peer: PeerStories, isSelf: boolean, removal: 'hide' | 'remove';
     createContextMenu({
       buttons: [{
         icon: 'stories',
         text: 'SavedStories',
         onClick: () => {
-          appSidebarLeft.createTab(AppMyStoriesTab).open(AppMyStoriesTab.getInitArgs());
+          hotReloadGuard.appSidebarLeft.createTab(hotReloadGuard.tabs.AppMyStoriesTab).open(hotReloadGuard.tabs.AppMyStoriesTab.getInitArgs());
         },
         verify: () => isSelf
       }, {
         icon: 'archive',
         text: 'ArchivedStories',
         onClick: () => {
-          appSidebarLeft.createTab(AppMyStoriesTab).open({...AppMyStoriesTab.getInitArgs(), isArchive: true});
+          hotReloadGuard.appSidebarLeft.createTab(hotReloadGuard.tabs.AppMyStoriesTab).open({...hotReloadGuard.tabs.AppMyStoriesTab.getInitArgs(), isArchive: true});
         },
         verify: () => isSelf
       }, {
         icon: 'message',
         text: 'SendMessage',
         onClick: () => {
-          appImManager.setInnerPeer({
+          hotReloadGuard.appImManager.setInnerPeer({
             peerId: peer.peerId,
             type: ChatType.Chat
           });
@@ -377,7 +411,7 @@ function _StoriesList(props: {
         icon: 'channel',
         text: 'OpenChannel2',
         onClick: () => {
-          appImManager.setInnerPeer({
+          hotReloadGuard.appImManager.setInnerPeer({
             peerId: peer.peerId,
             type: ChatType.Chat
           });
@@ -396,7 +430,7 @@ function _StoriesList(props: {
         verify: () => !isSelf && rootScope.managers.appNotificationsManager.isPeerStoriesMuted(peer.peerId),
         multiline: true
       }, {
-        icon: 'eyecross_outline',
+        icon: 'eyecross',
         text: 'Stories.StealthMode.View',
         onClick: () => {
           const {peerId} = peer;
@@ -415,7 +449,12 @@ function _StoriesList(props: {
         icon: 'archive',
         text: 'ArchivePeerStories',
         onClick: () => toggleHidden(true),
-        verify: () => !isSelf && !props.archive
+        verify: () => !isSelf && !props.archive && removal === 'hide'
+      }, {
+        icon: 'delete',
+        text: 'StoriesRemoveFromRecent',
+        onClick: () => removeStoriesFromRecent(peer.peerId),
+        verify: () => !isSelf && !props.archive && removal === 'remove'
       }, {
         icon: 'unarchive',
         text: 'UnarchiveStories',
@@ -427,17 +466,16 @@ function _StoriesList(props: {
       findElement: (e) => {
         return !folded() && findUpClassName(e.target, styles.ListItem);
       },
-      onOpen: (e, target) => {
+      onOpen: async(e, target) => {
         peer = itemsTarget.get(target as HTMLDivElement);
         isSelf = peer.peerId === rootScope.myId;
+        removal = await rootScope.managers.appStoriesManager.getPeerStoriesRemoval(peer.peerId);
       },
       onClose: () => {
         peer = undefined;
       }
     });
   });
-
-  const shouldStoriesSegmentsBeFolded = createMemo(() => progress() !== STATE_UNFOLDED);
 
   return (
     <>

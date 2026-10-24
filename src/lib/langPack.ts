@@ -1,7 +1,9 @@
 import type lang from '@/lang';
 import type langSign from '@/langSign';
+import langPackLocalVersion from '@/langPackLocalVersion';
 import type {State} from '@config/state';
 import {IS_BETA, MOUNT_CLASS_TO} from '@config/debug';
+import Modes from '@config/modes';
 import {HelpCountry, LangPackDifference, LangPackString} from '@layer';
 import App from '@config/app';
 import rootScope from '@lib/rootScope';
@@ -69,14 +71,28 @@ export const langPack: {[actionType: string]: LangPackKey} = {
 
 export type LangPackKey = /* string |  */keyof typeof lang | keyof typeof langSign;
 
+// * base codes of the languages written right to left, for a pack the server has not said that of
+// * (`langPackLanguage.rtl`, kept with the pack): one stored before it was kept, or a code it does not
+// * know. A regional or custom pack (`fa-af`, `ar-raw`) goes by the part before the dash
+const RTL_LANG_CODES = new Set(['ar', 'arc', 'ckb', 'dv', 'fa', 'he', 'iw', 'ps', 'sd', 'ug', 'ur', 'yi']);
+
+export function isRTLLangCode(langCode: string) {
+  return !!langCode && RTL_LANG_CODES.has(langCode.split('-', 1)[0].toLowerCase());
+}
+
 export type FormatterArgument = string | number | Node | FormatterArgument[];
 export type FormatterArguments = FormatterArgument[];
 
 export const UNSUPPORTED_LANG_PACK_KEY: LangPackKey = IS_MOBILE ? 'Message.Unsupported.Mobile' : 'Message.Unsupported.Desktop';
 const TEST_LOCAL = IS_BETA && true;
 
+/** A string of the client's own English pack: where the server's pack has none, it stands in. */
+type LocalLangPackString = LangPackString & {local?: true};
+
 namespace I18n {
   export const strings: Map<LangPackKey, LangPackString> = new Map();
+  // * keys a right-to-left pack leaves to the English stand-in: that text reads left to right
+  export const untranslatedKeys: Set<LangPackKey> = new Set();
   export const countriesList: HelpCountry[] = [];
   let pluralRules: Intl.PluralRules;
 
@@ -85,18 +101,57 @@ namespace I18n {
   let lastRequestedNormalizedLangCode: string;
   let lastAppliedLangCode: string;
   let timeFormat: State['settings']['timeFormat'];
-  let isRTL = false;
+  // * a signal, so what is laid out in JS (icons, menus, transitions) can follow a language switched
+  // * on the fly; read it untracked through `getIsRTL()` anywhere outside a reactive scope
+  export const [isRTL, setIsRTL] = createSignal(false);
 
   export function getLastRequestedLangCode() { return lastRequestedLangCode; }
   export function getLastRequestedNormalizedLangCode() { return lastRequestedNormalizedLangCode; }
   export function getLastAppliedLangCode() { return lastAppliedLangCode; }
   export function getTimeFormat() { return timeFormat; }
-  export function getIsRTL() { return isRTL; }
+  export function getIsRTL() { return isRTL(); }
 
   export const [langCodeNormalized, setLangCodeNormalized] = createSignal<TranslatableLanguageISO>();
 
-  export function setRTL(rtl: boolean) {
-    isRTL = rtl;
+  // the bundled strings and their version: in dev a hot update swaps in the edited ones (see the end of the module)
+  let localVersion = langPackLocalVersion;
+  const localStrings: {lang?: typeof import('@/lang'), langSign?: typeof import('@/langSign')} = {};
+  export function getLocalVersion() { return localVersion; }
+
+  function importLocalStrings() {
+    return Promise.all([localStrings.lang ?? import('../lang'), localStrings.langSign ?? import('../langSign')]);
+  }
+
+  let forcedRTL: boolean = Modes.rtl || undefined;
+  // * the direction of the language applied last, which a forced one stands over
+  let languageRTL: boolean;
+
+  /** Overrides the language's direction until called with `undefined` (the popup sandbox's switch). */
+  export function forceRTL(rtl: boolean | undefined) {
+    forcedRTL = rtl;
+    applyDirection(lastRequestedLangCode, languageRTL);
+  }
+
+  /**
+   * Lays the document out in the direction of the language `langCode` (`?rtl=1` forces right to left
+   * whatever the language): `dir` drives the logical properties, `.is-rtl` the `--reflect` math and
+   * what cannot be written logically. Also names the document's language, for screen readers and
+   * `:lang()`. `rtl` is the server's word on the language (`langPackLanguage.rtl`); without it the
+   * language goes by its code.
+   */
+  export function applyDirection(langCode: string, rtl = isRTLLangCode(langCode)) {
+    languageRTL = rtl;
+    rtl = forcedRTL ?? rtl;
+    setIsRTL(rtl);
+
+    if(typeof(document) === 'undefined') {
+      return;
+    }
+
+    const root = document.documentElement;
+    root.dir = rtl ? 'rtl' : 'ltr';
+    root.classList.toggle('is-rtl', rtl);
+    if(langCode) root.lang = langCode;
   }
 
   function setLangCode(langCode: string) {
@@ -127,35 +182,18 @@ namespace I18n {
     });
   }
 
-  function updateAmPm() {
-    if(timeFormat === 'h12') {
-      try {
-        const dateTimeFormat = getDateTimeFormat({hour: 'numeric', minute: 'numeric', hour12: true});
-        const date = new Date();
-        date.setHours(0);
-        const amText = dateTimeFormat.format(date);
-        amPmCache.am = amText.split(/\s/)[1];
-        date.setHours(12);
-        const pmText = dateTimeFormat.format(date);
-        amPmCache.pm = pmText.split(/\s/)[1];
-      } catch(err) {
-        console.error('cannot get am/pm', err);
-        amPmCache.am = 'AM';
-        amPmCache.pm = 'PM';
-      }
-    }
-  }
-
   export function setTimeFormat(
     format: State['settings']['timeFormat'],
     haveToUpdate = !!timeFormat && timeFormat !== format
   ) {
+    if(timeFormat !== format) {
+      // * drop formatters minted before the first call too — they carry no -u-hc- and would outlive it
+      cachedDateTimeFormats.clear();
+    }
+
     timeFormat = format;
 
-    updateAmPm();
-
     if(haveToUpdate) {
-      cachedDateTimeFormats.clear();
       const elements = Array.from(document.querySelectorAll(`.i18n`)) as HTMLElement[];
       elements.forEach((element) => {
         const instance = weakMap.get(element);
@@ -170,10 +208,9 @@ namespace I18n {
   export function loadLocalLangPack() {
     const defaultCode = App.langPackCode;
     return Promise.all([
-      import('../lang'),
-      import('../langSign'),
+      importLocalStrings(),
       import('../countries')
-    ]).then(([lang, langSign, countries]) => {
+    ]).then(([[lang, langSign], countries]) => {
       const strings: LangPackString[] = [];
       formatLocalStrings(lang.default, strings);
       formatLocalStrings(langSign.default, strings);
@@ -185,7 +222,7 @@ namespace I18n {
         strings,
         version: App.langPackVersion,
         countries: countries.default,
-        localVersion: App.langPackLocalVersion
+        localVersion
       };
       return langPack;
     });
@@ -193,14 +230,14 @@ namespace I18n {
 
   export function loadLangPack(langCode: string, web?: boolean, ignoreCache?: boolean) {
     web = true;
-    const managers = rootScope.managers;
     return Promise.all([
-      managers.appLangPackManager.getLangPack(langCode, web ? 'web' : App.langPack, ignoreCache),
-      !web && managers.appLangPackManager.getLangPack(langCode, 'android', ignoreCache),
-      import('../lang'),
-      import('../langSign'),
-      managers.appLangPackManager.getCountriesList(langCode, ignoreCache),
-      polyfillPromise
+      rootScope.managers.appLangPackManager.getLangPack(langCode, web ? 'web' : App.langPack, ignoreCache),
+      !web && rootScope.managers.appLangPackManager.getLangPack(langCode, 'android', ignoreCache),
+      importLocalStrings(),
+      rootScope.managers.appLangPackManager.getCountriesList(langCode, ignoreCache),
+      polyfillPromise,
+      // * no word from the server (a code it does not know) leaves the direction to the code
+      rootScope.managers.appLangPackManager.getLanguage(langCode, web ? 'web' : App.langPack).catch((): undefined => undefined)
     ]);
   }
 
@@ -231,12 +268,23 @@ namespace I18n {
   }
 
   export function getLangPackAndApply(langCode: string, web?: boolean, ignoreCache?: boolean) {
+    const previousLangCode = lastRequestedLangCode;
     setLangCode(langCode);
-    return loadLangPack(langCode, web, ignoreCache).then(([langPack1, langPack2, localLangPack1, localLangPack2, countries, _]) => {
+    return loadLangPack(langCode, web, ignoreCache).catch((err) => {
+      // * roll back so date formatters aren't built from a language that was never applied
+      if(previousLangCode && lastRequestedLangCode === langCode) {
+        setLangCode(previousLangCode);
+      }
+
+      throw err;
+    }).then(([langPack1, langPack2, [localLangPack1, localLangPack2], countries, _, language]) => {
       let strings: LangPackString[] = [];
 
       const pushLocal = () => [localLangPack1, localLangPack2].forEach((l) => {
-        formatLocalStrings(l.default as any, strings);
+        for(const string of formatLocalStrings(l.default as any)) {
+          (string as LocalLangPackString).local = true;
+          strings.push(string);
+        }
       });
 
       if(!TEST_LOCAL) pushLocal();
@@ -245,7 +293,8 @@ namespace I18n {
 
       langPack1.strings = strings;
       langPack1.countries = countries;
-      langPack1.localVersion = App.langPackLocalVersion;
+      langPack1.localVersion = localVersion;
+      if(language) langPack1.rtl = !!language.pFlags.rtl;
       return saveLangPack(langPack1, true);
     });
   }
@@ -291,9 +340,17 @@ namespace I18n {
     }
 
     strings.clear();
+    untranslatedKeys.clear();
 
     for(const string of langPack.strings) {
       strings.set(string.key as LangPackKey, string);
+    }
+
+    const rtl = langPack.rtl ?? isRTLLangCode(langPack.lang_code);
+    if(rtl) {
+      strings.forEach((string, key) => {
+        if((string as LocalLangPackString).local) untranslatedKeys.add(key);
+      });
     }
 
     if(langPack.countries) {
@@ -312,6 +369,8 @@ namespace I18n {
       });
     }
 
+    applyDirection(currentLangCode, rtl);
+
     if(lastAppliedLangCode !== currentLangCode) {
       if(lastAppliedLangCode && rootScope.myId) {
         rootScope.managers.appReactionsManager.resetAvailableReactions();
@@ -321,10 +380,13 @@ namespace I18n {
 
       lastAppliedLangCode = currentLangCode;
       cachedDateTimeFormats.clear();
-      updateAmPm();
       rootScope.dispatchEvent('language_change', currentLangCode);
     }
 
+    updateElements();
+  }
+
+  function updateElements() {
     const elements = Array.from(document.querySelectorAll(`.i18n`)) as HTMLElement[];
     elements.forEach((element) => {
       const instance = weakMap.get(element);
@@ -335,6 +397,48 @@ namespace I18n {
     });
 
     rootScope.dispatchEventSingle('language_apply');
+  }
+
+  /**
+   * dev: the edited lang.ts / langSign.ts (or the version the dev server bumps) taken in place. The bundled strings
+   * win over the server's there anyway (TEST_LOCAL), so this gives what applying the whole pack again would.
+   */
+  // one at a time: Vite calls the accept callback once for each of the modules a batch updated, and an application that
+  // read the strings before another finished would write the older ones back over it
+  let localUpdates: Promise<void> = Promise.resolve();
+  export function applyLocalUpdate(update: Partial<typeof localStrings> & {version?: number}) {
+    return localUpdates = localUpdates.then(() => applyLocalUpdateNow(update)).catch((err) => {
+      console.error('local strings update failed', err);
+    });
+  }
+
+  async function applyLocalUpdateNow(update: Partial<typeof localStrings> & {version?: number}) {
+    localVersion = update.version ?? localVersion;
+    if(!update.lang && !update.langSign) {
+      return;
+    }
+
+    const previous = await importLocalStrings();
+    if(update.lang) localStrings.lang = update.lang;
+    if(update.langSign) localStrings.langSign = update.langSign;
+    if(!lastAppliedLangCode) {
+      return;
+    }
+
+    previous.forEach((module) => Object.keys(module.default).forEach((key) => {
+      strings.delete(key as LangPackKey);
+      untranslatedKeys.delete(key as LangPackKey);
+    }));
+    (await importLocalStrings()).forEach((module) => {
+      formatLocalStrings(module.default).forEach((string) => {
+        // marked as getLangPackAndApply and applyLangPack mark them: English laid over a right-to-left pack is a
+        // fallback, isolated left to right
+        (string as LocalLangPackString).local = true;
+        strings.set(string.key as LangPackKey, string);
+        if(languageRTL) untranslatedKeys.add(string.key as LangPackKey);
+      });
+    });
+    updateElements();
   }
 
   function pushNextArgument(out: ReturnType<typeof superFormatter>, args: FormatterArguments, indexHolder: {i: number}, i?: number) {
@@ -413,13 +517,21 @@ namespace I18n {
             a = a.firstChild as any;
           }
 
-          if(typeof(a) !== 'string') {
+          // A string whose link carries its own placeholder ("[x](%1$@)", the shape the macOS
+          // packs use) makes the index scan above start past the argument the anchor was passed
+          // in, so there is nothing here to hang the link on; a text whose arguments are ordered
+          // differently from the call (a stored pack from before a reorder) hands it a number.
+          // Render the label rather than throwing: one malformed string used to take down
+          // everything around it.
+          if(typeof(a) !== 'object') {
+            a = undefined;
+          } else if(a) {
             a.textContent = ''; // reset content
           }
         }
 
         const formatted = superFormatter(text, args, indexHolder) as any;
-        if(typeof(a) === 'string') {
+        if(!a) {
           out.push(...formatted);
         } else {
           a.append(...formatted);
@@ -529,6 +641,30 @@ namespace I18n {
     abstract update(options?: Options): void;
   }
 
+  /**
+   * English standing in for a string a right-to-left pack lacks reads left to right, its full stop
+   * at its end: its text goes into a left-to-right isolate. The spaces at its edges, which join it
+   * to its neighbours, stay outside, and the element itself keeps the direction of its line.
+   */
+  function isolateUntranslated(element: HTMLElement) {
+    const isolate = document.createElement('span');
+    isolate.dir = 'ltr';
+    isolate.append(...Array.from(element.childNodes));
+
+    const edge = (node: ChildNode, pattern: RegExp) => {
+      if(node?.nodeType !== Node.TEXT_NODE) return;
+      const text = node as Text;
+      const match = pattern.exec(text.data);
+      if(!match || match[0].length === text.data.length) return;
+      text.data = text.data.slice(0, match.index) + text.data.slice(match.index + match[0].length);
+      return match[0];
+    };
+
+    const leading = edge(isolate.firstChild, /^\s+/);
+    const trailing = edge(isolate.lastChild, /\s+$/);
+    element.append(...[leading, isolate, trailing].filter(Boolean));
+  }
+
   export type IntlElementOptions = IntlElementBaseOptions & {
     key?: LangPackKey,
     args?: FormatterArguments
@@ -557,6 +693,10 @@ namespace I18n {
         this.element.replaceChildren(...format(this.key, false, this.args) as any);
         if(this.args?.length) {
           this.element.normalize();
+        }
+
+        if(untranslatedKeys.has(this.key)) {
+          isolateUntranslated(this.element);
         }
       } else {
         // @ts-ignore
@@ -592,14 +732,69 @@ namespace I18n {
     const json = JSON.stringify(options);
     let dateTimeFormat = cachedDateTimeFormats.get(json);
     if(!dateTimeFormat) {
-      dateTimeFormat = new Intl.DateTimeFormat(lastRequestedNormalizedLangCode + '-u-hc-' + timeFormat, options);
+      dateTimeFormat = new Intl.DateTimeFormat(lastRequestedNormalizedLangCode + (timeFormat ? '-u-hc-' + timeFormat : ''), options);
       cachedDateTimeFormats.set(json, dateTimeFormat);
     }
 
     return dateTimeFormat;
   }
 
-  export const amPmCache = {am: 'AM', pm: 'PM'};
+  // * format() on a cached formatter is still ~20x the cost of string concatenation, and times repeat heavily —
+  // * memoize per minute of day (max 1440 entries); keying by formatter makes the memo die with it on locale/format change
+  const timeStringsCache: WeakMap<Intl.DateTimeFormat, Map<number, string>> = new WeakMap();
+  const TIME_STRING_OPTIONS: Intl.DateTimeFormatOptions = {hour: '2-digit', minute: '2-digit'};
+  const TIME_STRING_OPTIONS_JSON = JSON.stringify(TIME_STRING_OPTIONS);
+  function warmTimeStrings(dateTimeFormat: Intl.DateTimeFormat, timeStrings: Map<number, string>) {
+    // * a later locale/format change orphans this generation — drop the leftover work
+    if(cachedDateTimeFormats.get(TIME_STRING_OPTIONS_JSON) !== dateTimeFormat) {
+      return;
+    }
+
+    const date = new Date();
+    let budget = 240; // * ~0.2ms per chunk, the rest resumes from the next idle period
+    for(let minutesKey = 0; minutesKey < 1440; ++minutesKey) {
+      if(timeStrings.has(minutesKey)) {
+        continue;
+      }
+
+      if(--budget < 0) {
+        scheduleWarmTimeStrings(dateTimeFormat, timeStrings);
+        return;
+      }
+
+      const hours = (minutesKey / 60) | 0, minutes = minutesKey % 60;
+      date.setHours(hours, minutes, 0, 0);
+      // * a DST hole would shift the synthetic date to a different wall time — leave such keys to the lazy path
+      if(date.getHours() === hours && date.getMinutes() === minutes) {
+        timeStrings.set(minutesKey, dateTimeFormat.format(date));
+      }
+    }
+  }
+
+  function scheduleWarmTimeStrings(dateTimeFormat: Intl.DateTimeFormat, timeStrings: Map<number, string>) {
+    const warm = () => warmTimeStrings(dateTimeFormat, timeStrings);
+    self.requestIdleCallback ? self.requestIdleCallback(warm) : setTimeout(warm, 100);
+  }
+
+  function formatTimeString(date: Date) {
+    // * skip getDateTimeFormat's per-call JSON.stringify on this hot path
+    const dateTimeFormat = cachedDateTimeFormats.get(TIME_STRING_OPTIONS_JSON) || getDateTimeFormat(TIME_STRING_OPTIONS);
+    let timeStrings = timeStringsCache.get(dateTimeFormat);
+    if(!timeStrings) {
+      timeStringsCache.set(dateTimeFormat, timeStrings = new Map());
+      // * pre-render the whole day off the critical path so batches of distinct times never pay for Intl
+      scheduleWarmTimeStrings(dateTimeFormat, timeStrings);
+    }
+
+    const minutesKey = date.getHours() * 60 + date.getMinutes();
+    let text = timeStrings.get(minutesKey);
+    if(text === undefined) {
+      timeStrings.set(minutesKey, text = dateTimeFormat.format(date));
+    }
+
+    return text;
+  }
+
   export type IntlDateElementOptions = IntlElementBaseOptions & {
     date?: Date,
     options: Intl.DateTimeFormatOptions
@@ -622,15 +817,8 @@ namespace I18n {
 
       let text: string;
       if(this.options.hour && this.options.minute && Object.keys(this.options).length === 2/*  && false */) {
-        const hours = this.date.getHours();
-        text = ('0' + (timeFormat === 'h12' ? (hours % 12) || 12 : hours)).slice(-2) + ':' + ('0' + this.date.getMinutes()).slice(-2);
-        // if(this.options.second) {
-        //   text += ':' + ('0' + this.date.getSeconds()).slice(-2);
-        // }
-
-        if(timeFormat === 'h12') {
-          text += ' ' + (hours < 12 ? amPmCache.am : amPmCache.pm);
-        }
+        // * no capitalizeFirstLetter here — hu renders 'de. 12:05' and must not become 'De. 12:05'
+        text = formatTimeString(this.date);
       } else {
         // * https://developer.mozilla.org/en-US/docs/Web/JavaScript/Reference/Global_Objects/Intl/Locale/hourCycle#adding_an_hour_cycle_via_the_locale_string
         const dateTimeFormat = getDateTimeFormat(this.options);
@@ -767,6 +955,17 @@ export function handleStateCleared() {
 
 export async function checkLangPackForUpdates() {
   const storedLangPack = await I18n.getCacheLangPack();
+  // * a pack stored before its language's direction was kept asks the server once
+  if(storedLangPack.rtl === undefined) {
+    // oxlint-disable-next-line tweb/managers-before-await -- the pack is the app's, any account fetches it
+    const language = await rootScope.managers.appLangPackManager.getLanguage(storedLangPack.lang_code, 'web').catch((): undefined => undefined);
+    if(language && storedLangPack.lang_code === I18n.getLastRequestedLangCode()) {
+      storedLangPack.rtl = !!language.pFlags.rtl;
+      await I18n.saveLangPack(storedLangPack, true);
+    }
+  }
+
+  // oxlint-disable-next-line tweb/managers-before-await -- the pack is the app's, any account fetches it
   const difference = await rootScope.managers.appLangPackManager.getDifference(storedLangPack.lang_code, storedLangPack.version);
   if(difference.version > storedLangPack.version) {
     return handleUpdateLangPack({difference});
@@ -779,3 +978,11 @@ rootScope.addEventListener('langpack_update_too_long', handleUpdateLangPackTooLo
 rootScope.addEventListener('state_cleared', handleStateCleared);
 
 MOUNT_CLASS_TO && (MOUNT_CLASS_TO.I18n = I18n);
+
+// An edit of the strings, or the version bump every dev-server start writes (watch-lang.js), would otherwise reload
+// every open page of the checkout. This module must stay out of the workers for that: they have no HMR client.
+if(import.meta.hot) {
+  import.meta.hot.accept(['../lang', '../langSign', '../langPackLocalVersion'], ([lang, langSign, version]) => {
+    I18n.applyLocalUpdate({lang: lang as any, langSign: langSign as any, version: version?.default});
+  });
+}

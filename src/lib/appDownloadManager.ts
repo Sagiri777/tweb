@@ -4,7 +4,7 @@ import type {MyDocument} from '@appManagers/appDocsManager';
 import deferredPromise, {CancellablePromise} from '@helpers/cancellablePromise';
 import {InputFile, InputFileLocation, Photo, PhotoSize} from '@layer';
 import getFileNameForUpload from '@helpers/getFileNameForUpload';
-import {AppManagers} from '@lib/managers';
+import {TabManagers} from '@lib/managers';
 import rootScope from '@lib/rootScope';
 import {MOUNT_CLASS_TO} from '@config/debug';
 import noop from '@helpers/noop';
@@ -20,6 +20,8 @@ import apiManagerProxy from '@lib/apiManagerProxy';
 import {IS_MOBILE_SAFARI} from '@environment/userAgent';
 import isWebFileLocation from '@appManagers/utils/webFiles/isWebFileLocation';
 import {MIME_TYPE_EXTENSION_MAP} from '@environment/mimeTypeMap';
+import {isObjectURL} from '@helpers/objectUrlUtils';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 export type ResponseMethodBlob = 'blob';
 export type ResponseMethodJson = 'json';
@@ -32,34 +34,63 @@ export type DownloadUrl = CancellablePromise<string>;
 export type DownloadJson = CancellablePromise<any>;
 // export type Download = DownloadBlob/*  | DownloadJson */;
 export type Download = DownloadBlob | DownloadUrl/*  | DownloadJson */;
+type CachedDownloadUrl = DownloadUrl & {resolvedObjectURL?: string};
 
 export type Progress = {done: number, fileName: string, total: number, offset: number};
 export type ProgressCallback = (details: Progress) => void;
 
 type DownloadType = 'url' | 'blob' | 'void' | 'disc';
 
+// * Resolved downloads are kept only to dedup a repeat request for the same media (the media viewer
+// * paging back and forth, a bubble re-rendering). Without a bound they never left `downloads` at
+// * all - only a REJECTED download was cleared - so a day-old tab held every Blob it had ever
+// * downloaded. Sized like the worker-side object-URL caches next door.
+const RESOLVED_DOWNLOAD_LIMIT = 64;
+const RESOLVED_DOWNLOAD_BYTES_LIMIT = 32 * 1024 * 1024;
+
 export class AppDownloadManager {
   private downloads: {[fileName: string]: {main: Download} & {[type in DownloadType]?: Download}} = {};
+  // * Insertion-ordered = LRU order; re-inserting on read moves an entry to the end
+  private resolved: Map<string, {fileName: string, type: DownloadType, size: number}> = new Map();
+  private resolvedBytes = 0;
   // private downloadsToDisc: {[fileName: string]: Download} = {};
   private progress: {[fileName: string]: Progress} = {};
+  // * A download to disc whose service worker handshake fails goes on as a plain download, under the
+  // * file name without '_download': its progress is for the deferred kept under the streamed name
+  private progressAliases: {[fileName: string]: string} = {};
   // private progressCallbacks: {[fileName: string]: Array<ProgressCallback>} = {};
-  private managers: AppManagers;
+  private managers: TabManagers;
 
   // To be assigned elsewhere in the app, importing confirmationPopup here will result in an importing error
   public showPollCancelConfirmation: (randomId: string) => void;
 
-  public construct(managers: AppManagers) {
+  public construct(managers: TabManagers) {
     this.managers = managers;
+    // * a download still on its way when the tab switches accounts is the previous account's, and what it
+    // * brings is dropped: the next account asks for the same file anew rather than wait on it
+    rootScope.addEventListener('account_switched', () => {
+      for(const fileName in this.downloads) {
+        const download = this.downloads[fileName];
+        const isPending = Object.values(download).some((deferred) => !deferred.isFulfilled && !deferred.isRejected);
+        if(isPending) {
+          delete this.downloads[fileName];
+          delete this.progress[fileName];
+        }
+      }
+    });
+
     rootScope.addEventListener('download_progress', (details) => {
       // const callbacks = this.progressCallbacks[details.fileName];
       // if(callbacks) {
       //   callbacks.forEach((callback) => callback(details));
       // }
 
-      const download = this.downloads[details.fileName];
-      if(download?.main?.notifyAll) {
-        this.progress[details.fileName] = details;
-        download.main.notifyAll(details);
+      for(const fileName of [details.fileName, this.progressAliases[details.fileName]]) {
+        const download = fileName && this.downloads[fileName];
+        if(download?.main?.notifyAll) {
+          this.progress[fileName] = details;
+          download.main.notifyAll(details);
+        }
       }
     });
   }
@@ -74,11 +105,12 @@ export class AppDownloadManager {
       };
 
       const runCancel = async() => {
+        const managers = bindManagersToSession(this.managers);
         if(await this.confirmBeforeCancelingPollUpload(fileName)) return;
 
         const error = makeError('DOWNLOAD_CANCELED');
 
-        this.managers.apiFileManager.cancelDownload(fileName);
+        managers.apiFileManager.cancelDownload(fileName);
 
         deferred.reject(error);
         deferred.cancel = noop;
@@ -88,10 +120,12 @@ export class AppDownloadManager {
         runCancel();
       };
 
+      // * unless the entry has been let go meanwhile (an account switch) and the file asked for anew
+      const isOwnEntry = () => this.downloads[fileName] === download;
       deferred.catch(() => {
-        this.clearDownload(fileName, type);
+        if(isOwnEntry()) this.clearDownload(fileName, type);
       }).finally(() => {
-        delete this.progress[fileName];
+        if(isOwnEntry()) delete this.progress[fileName];
         // delete this.progressCallbacks[fileName];
       });
     } else {
@@ -109,7 +143,7 @@ export class AppDownloadManager {
     const haveToClear = type === 'disc';
     if(haveToClear) {
       deferred.catch(noop).finally(() => {
-        this.clearDownload(fileName, type);
+        if(this.downloads[fileName] === download) this.clearDownload(fileName, type);
       });
     }
 
@@ -127,13 +161,54 @@ export class AppDownloadManager {
 
   public getNewDeferredForUpload<T extends Promise<any>>(fileName: string, promise: T) {
     const deferred: CancellablePromise<Awaited<T>> = this.getNewDeferred<InputFile>(fileName);
+    const download = this.downloads[fileName];
     promise.then(deferred.resolve.bind(deferred), deferred.reject.bind(deferred));
 
-    deferred.finally(() => {
-      this.clearDownload(fileName);
+    // * a failed upload is the caller's to handle - a bare finally() would report it again as unhandled
+    deferred.catch(noop).finally(() => {
+      if(this.downloads[fileName] === download) this.clearDownload(fileName);
     });
 
     return deferred;
+  }
+
+  private resolvedKey(fileName: string, type: DownloadType) {
+    return type + ':' + fileName;
+  }
+
+  // * Called once a download settles; evicts the coldest resolved entries past the budget.
+  private trackResolved(fileName: string, type: DownloadType, deferred: Download, value: any) {
+    // * already cleared while settling (the 'disc' path does that), or let go with an account switch
+    if(this.downloads[fileName]?.[type] !== deferred) {
+      return;
+    }
+
+    const key = this.resolvedKey(fileName, type);
+    const size = value instanceof Blob ? value.size : 0;
+    this.forgetResolved(key);
+    this.resolved.set(key, {fileName, type, size});
+    this.resolvedBytes += size;
+
+    while(this.resolved.size > RESOLVED_DOWNLOAD_LIMIT || this.resolvedBytes > RESOLVED_DOWNLOAD_BYTES_LIMIT) {
+      const oldest = this.resolved.keys().next();
+      if(oldest.done || oldest.value === key) { // never evict the entry that just arrived
+        break;
+      }
+
+      const entry = this.resolved.get(oldest.value);
+      this.forgetResolved(oldest.value);
+      this.clearDownload(entry.fileName, entry.type);
+    }
+  }
+
+  private forgetResolved(key: string) {
+    const entry = this.resolved.get(key);
+    if(!entry) {
+      return;
+    }
+
+    this.resolvedBytes -= entry.size;
+    this.resolved.delete(key);
   }
 
   private clearDownload(fileName: string, type?: DownloadType) {
@@ -142,11 +217,20 @@ export class AppDownloadManager {
       return;
     }
 
+    if(type) {
+      this.forgetResolved(this.resolvedKey(fileName, type));
+    }
+
     delete downloads[type];
 
     const length = Object.keys(downloads).length;
     if(!length || (downloads.main && length === 1)) {
       delete this.downloads[fileName];
+      // * The record goes as a whole (an upload finalizing clears it without a type), so every
+      // * type still tracked for this file must go with it - otherwise the budget counts ghosts
+      for(const key in downloads) {
+        this.forgetResolved(this.resolvedKey(fileName, key as DownloadType));
+      }
     }
   }
 
@@ -181,6 +265,13 @@ export class AppDownloadManager {
 
     deferred = this.getNewDeferred<Blob>(fileName, type);
     getPromise().then(deferred.resolve.bind(deferred), deferred.reject.bind(deferred));
+    deferred.then((value) => this.trackResolved(fileName, type, deferred, value), noop);
+    if(type === 'url') {
+      const urlDeferred = deferred as CachedDownloadUrl;
+      urlDeferred.then((url) => {
+        urlDeferred.resolvedObjectURL = url;
+      }, noop);
+    }
     return deferred;
   }
 
@@ -194,16 +285,33 @@ export class AppDownloadManager {
   }
 
   public downloadMedia(options: DownloadMediaOptions, type: DownloadType = 'blob', promiseBefore?: Promise<any>): DownloadBlob {
-    const {downloadOptions, fileName} = getDownloadMediaDetails(options);
+    const {fileName} = getDownloadMediaDetails(options);
+
+    if(type === 'url') {
+      const cached = this.getDownload(fileName, type) as CachedDownloadUrl;
+      const resolvedObjectURL = cached?.resolvedObjectURL;
+      if(
+        isObjectURL(resolvedObjectURL) &&
+        apiManagerProxy.getCacheContext(options.media as any, options.thumb?.type).url !== resolvedObjectURL
+      ) {
+        // The worker evicted this URL and already invalidated the tab mirror.
+        // Do not hand a newly rendered element the fulfilled promise's revoked
+        // value; let the worker recreate/re-adopt a URL from its Blob cache.
+        this.clearDownload(fileName, type);
+      }
+    }
 
     return this.d(fileName, () => {
+      // * the account session the file is asked in: a save that waits for the service worker first goes
+      // * nowhere once the tab is on another account
+      const {apiFileManager} = bindManagersToSession(this.managers);
       let cb: any;
       if(type === 'url') {
-        cb = this.managers.apiFileManager.downloadMediaURL;
+        cb = apiFileManager.downloadMediaURL;
       } else if(type === 'void'/*  || type === 'disc' */) {
-        cb = this.managers.apiFileManager.downloadMediaVoid;
+        cb = apiFileManager.downloadMediaVoid;
       } else /* if(type === 'blob') */ {
-        cb = this.managers.apiFileManager.downloadMedia;
+        cb = apiFileManager.downloadMedia;
       }
 
       if(promiseBefore) {
@@ -211,7 +319,15 @@ export class AppDownloadManager {
           return cb(options);
         }, () => {
           delete options.downloadId;
-          return cb(options);
+          const {fileName: plainFileName} = getDownloadMediaDetails(options);
+          this.progressAliases[plainFileName] = fileName;
+          const promise = cb(options);
+          promise.catch(noop).finally(() => {
+            if(this.progressAliases[plainFileName] === fileName) {
+              delete this.progressAliases[plainFileName];
+            }
+          });
+          return promise;
         });
       }
 
@@ -242,7 +358,17 @@ export class AppDownloadManager {
 
   public getDownload(fileName: string, type?: DownloadType) {
     const d = this.downloads[fileName];
-    return d && d[type];
+    const download = d && d[type];
+    if(download) { // a hit is a use: move it back to the warm end of the LRU
+      const key = this.resolvedKey(fileName, type);
+      const entry = this.resolved.get(key);
+      if(entry) {
+        this.resolved.delete(key);
+        this.resolved.set(key, entry);
+      }
+    }
+
+    return download;
   }
 
   // public addProgressCallback(fileName: string, callback: ProgressCallback) {
@@ -418,5 +544,6 @@ export class AppDownloadManager {
 }
 
 const appDownloadManager = new AppDownloadManager();
+if(import.meta.hot) import.meta.hot.accept();
 MOUNT_CLASS_TO && (MOUNT_CLASS_TO.appDownloadManager = appDownloadManager);
 export default appDownloadManager;

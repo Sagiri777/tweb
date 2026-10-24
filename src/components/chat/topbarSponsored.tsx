@@ -1,4 +1,5 @@
 import {Accessor, createEffect, createSignal, on, Show} from 'solid-js';
+import Modes from '@config/modes';
 import {AppManagers} from '@lib/managers';
 import {NULL_PEER_ID} from '@appManagers/constants';
 import Chat from '@components/chat/chat';
@@ -10,10 +11,8 @@ import styles from '@components/chat/topbarSponsored.module.scss';
 import {I18nTsx} from '@helpers/solid/i18n';
 import wrapRichText from '@lib/richTextProcessor/wrapRichText';
 import wrapEmojiText from '@lib/richTextProcessor/wrapEmojiText';
-import appImManager from '@lib/appImManager';
 import PhotoTsx from '@components/wrappers/photoTsx';
 import {MyPhoto} from '@appManagers/appPhotosManager';
-import PopupPremium from '@components/popups/premium';
 import createContextMenu from '@helpers/dom/createContextMenu';
 import {copyTextToClipboard} from '@helpers/clipboard';
 import {getSponsoredMessageButtons} from '@components/chat/contextMenu';
@@ -22,6 +21,9 @@ import createMiddleware from '@helpers/solid/createMiddleware';
 import Button from '@components/buttonTsx';
 import RippleElement from '@components/rippleElement';
 import {createTopbarPlate, TopbarPlateController} from '@components/chat/topbarPlate';
+import I18n from '@lib/langPack';
+import A11yButton from '@components/a11yButton';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 export type ChatSponsoredPlate = TopbarPlateController & {
   setPeerId: (peerId: PeerId) => void
@@ -59,14 +61,12 @@ function SponsoredPlateBody(props: {
     return undefined;
   };
 
-  const middleware = createMiddleware().get();
-
   return (
     <Show when={message()}>
       <RippleElement
         component="div"
         class={/* @once */ classNames(styles.container, 'quote-like-hoverable', 'overflow-hidden')}
-        onClick={() => appImManager.onSponsoredMessageClick(message())}
+        onClick={() => hotReloadGuard.appImManager.onSponsoredMessageClick(message())}
         ref={(el) => {
           createContextMenu({
             listenTo: el,
@@ -79,7 +79,9 @@ function SponsoredPlateBody(props: {
                 copyTextToClipboard(message().message);
               }
             }),
-            middleware
+            // * the menu lives as long as this element, which goes with every next message: one
+            // * middleware for the plate's whole life kept each old menu and its element on destroy
+            middleware: createMiddleware().get()
           });
         }}
       >
@@ -95,21 +97,26 @@ function SponsoredPlateBody(props: {
           </div>
         </Show>
         <div class={/* @once */ classNames(styles.content, 'disable-hover')}>
-          <div class="text-bold">
+          {/* a native button only with the keyboard layer: it is inline-block, keeps its own line height and takes the focus on click */}
+          <A11yButton
+            class="text-bold"
+            style={Modes.a11y ? {color: 'inherit', 'text-align': 'inherit'} : undefined}
+          >
             <I18nTsx class="primary" key="SponsoredMessageAd" />
             {' '}
-            {wrapEmojiText(message().title)}
-          </div>
-          <div class="pre-wrap">
+            <span dir="auto">{wrapEmojiText(message().title)}</span>
+          </A11yButton>
+          <div class="pre-wrap" dir="auto">
             {wrapRichText(message().message, {entities: message().entities})}
           </div>
         </div>
       </RippleElement>
       <Button.Icon
         icon="close"
+        aria-label={I18n.format('Premium.Boarding.NoAds.Action', true)}
         onClick={(e) => {
           e.stopPropagation();
-          PopupPremium.show({feature: 'no_ads'});
+          hotReloadGuard.showPremiumPopup({feature: 'no_ads'});
         }}
       />
     </Show>

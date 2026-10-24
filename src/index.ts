@@ -23,6 +23,8 @@ import I18n, {checkLangPackForUpdates, i18n, LangPackKey} from '@lib/langPack';
 import '@helpers/peerIdPolyfill';
 import '@lib/polyfill';
 import '@lib/debug/mountLogExport'; // main-thread-only: wires window.downloadLogs / collectLogs
+import '@lib/debug/memoryReport'; // main-thread-only: wires window.memoryReport
+import '@lib/debug/memoryWatch'; // main-thread-only: wires window.memoryWatch (crash-proof memory series)
 import apiManagerProxy from '@lib/apiManagerProxy';
 import getProxiedManagers from '@lib/getProxiedManagers';
 import themeController from '@helpers/themeController';
@@ -32,12 +34,13 @@ import singleInstance, {InstanceDeactivateReason} from '@lib/singleInstance';
 import {parseUriParamsLine} from '@helpers/string/parseUriParams';
 import Modes from '@config/modes';
 import {AuthState} from '@types';
-import DEBUG, {IS_BETA} from '@config/debug';
+import DEBUG, {IS_BETA, IS_POPUP_SANDBOX} from '@config/debug';
 import IS_INSTALL_PROMPT_SUPPORTED from '@environment/installPrompt';
 import cacheInstallPrompt from '@helpers/dom/installPrompt';
 import {fillLocalizedDates} from '@helpers/date';
 import {nextRandomUint} from '@helpers/random';
 import {createEffect} from 'solid-js';
+import {setHotReloadGuardLoader} from '@lib/solidjs/hotReloadGuardProvider';
 import {IS_OVERLAY_SCROLL_SUPPORTED, USE_CUSTOM_SCROLL, USE_NATIVE_SCROLL} from '@environment/overlayScrollSupport';
 import IMAGE_MIME_TYPES_SUPPORTED, {IMAGE_MIME_TYPES_SUPPORTED_PROMISE} from '@environment/imageMimeTypesSupport';
 import MEDIA_MIME_TYPES_SUPPORTED from '@environment/mediaMimeTypesSupport';
@@ -50,9 +53,9 @@ import sessionStorage from '@lib/sessionStorage';
 import replaceChildrenPolyfill from '@helpers/dom/replaceChildrenPolyfill';
 import listenForWindowPrint from '@helpers/dom/windowPrint';
 import cancelImageEvents from '@helpers/dom/cancelImageEvents';
-import PopupElement from '@components/popups';
+import listenForLinkPress from '@helpers/dom/linkPress';
+import PopupElement, {createPopup} from '@components/popups/indexTsx';
 import PasscodeLockScreenController from '@components/passcodeLock/passcodeLockScreenController'; PasscodeLockScreenController;
-import type {LangPackDifference} from '@layer';
 import commonStateStorage from '@lib/commonStateStorage';
 import {useAppSettings, setAppSettingsSilent} from '@stores/appSettings';
 import {isUserCollapsedLeft} from '@helpers/updateColumnWidths';
@@ -124,7 +127,7 @@ async function checkLastActiveAccountFromTMe() {
 
 function setManifest() {
   const manifest = document.getElementById('manifest') as HTMLLinkElement;
-  if(manifest) manifest.href = `site${IS_APPLE && !IS_APPLE_MOBILE ? '_apple' : ''}.webmanifest?v=jw3mK7G9Aq`;
+  if(manifest) manifest.href = `site${IS_APPLE && !IS_APPLE_MOBILE ? '_apple' : ''}.webmanifest?v=p9R6mT3xKv`;
 }
 
 function setViewportHeightListeners() {
@@ -235,6 +238,14 @@ function setSidebarLeftWidth() {
 function setRootClasses() {
   const add: string[] = [];
 
+  if(Modes.a11y) {
+    add.push('a11y');
+    // Pinch zoom. Not without the flag: with maximum-scale gone iOS also zooms
+    // into every field whose text is under 16px.
+    const viewport = document.querySelector<HTMLMetaElement>('meta[name="viewport"]');
+    if(viewport) viewport.content = viewport.content.replace(/,(maximum-scale=1|user-scalable=no)/g, '');
+  }
+
   if(IS_EMOJI_SUPPORTED) {
     add.push('native-emoji');
   }
@@ -254,7 +265,7 @@ function setRootClasses() {
     });
   }
 
-  // root.style.setProperty('--quote-icon', `"${getIconContent('quote')}"`);
+  // root.style.setProperty('--quote-icon', `"${getIconContent('quote_filled')}"`);
 
   if(IS_FIREFOX) {
     add.push('is-firefox', 'no-backdrop');
@@ -364,11 +375,7 @@ function onInstanceDeactivated(reason: InstanceDeactivateReason) {
     }
   };
 
-  const isUpdated = reason === 'version';
-  const popup = PopupElement.createPopup(PopupElement, 'popup-instance-deactivated', {overlayClosable: true});
-  const c = document.createElement('div');
-  c.classList.add('instance-deactivated-container');
-  (popup as any).container.replaceWith(c);
+  document.body.classList.add('deactivated');
 
   const header = document.createElement('div');
   header.classList.add('header');
@@ -378,31 +385,32 @@ function onInstanceDeactivated(reason: InstanceDeactivateReason) {
   subtitle.classList.add('subtitle');
   subtitle.append(i18n(map[reason].subtitle));
 
-  c.append(header, subtitle);
-
-  document.body.classList.add('deactivated');
-
-  popup.addEventListener('close', map[reason].onClick);
-  popup.show();
+  // the entry file is plain .ts, so the popup is composed by calling the component
+  createPopup(() => PopupElement({
+    class: 'popup-instance-deactivated',
+    containerClass: 'instance-deactivated-container',
+    closable: true,
+    onClose: map[reason].onClick,
+    children: [header, subtitle]
+  }));
 };
 
 const TIME_LABEL = 'Elapsed time since unlocked';
-
-function setDocumentLangPackProperties(langPack: LangPackDifference.langPackDifference) {
-  if(langPack.lang_code === 'ar' || langPack.lang_code === 'fa' && IS_BETA && false) {
-    document.documentElement.classList.add('is-rtl');
-    document.documentElement.dir = 'rtl';
-    document.documentElement.lang = langPack.lang_code;
-    I18n.setRTL(true);
-  } else {
-    document.documentElement.dir = 'ltr';
-  }
-}
 
 (window as any)['showIconLibrary'] = async() => {
   const {showIconLibrary} = await import('./components/iconLibrary/trigger');
   showIconLibrary();
 };
+
+// The popup sandbox, over a running app (`?popups=1` boots straight into it instead). The bare
+// `import.meta.env.DEV` is deliberate: only a `false` literal at the call site makes rolldown drop
+// the dynamic import before chunking. The authorized preview is a dev server, so it is covered.
+if(import.meta.env.DEV) {
+  (window as any)['showPopupSandbox'] = async() => {
+    const {showPopupSandbox} = await import('@components/popupSandbox');
+    await showPopupSandbox();
+  };
+}
 
 /* false &&  */document.addEventListener('DOMContentLoaded', async() => {
   const perf = performance.now();
@@ -410,13 +418,33 @@ function setDocumentLangPackProperties(langPack: LangPackDifference.langPackDiff
   setSidebarLeftWidth();
   toggleAttributePolyfill();
   replaceChildrenPolyfill();
-  rootScope.managers = getProxiedManagers();
   setManifest();
   setViewportHeightListeners();
   setWorkerProxy; // * just to import
   listenForWindowPrint();
   cancelImageEvents();
+  listenForLinkPress();
   setRootClasses();
+
+  // ?popups=1 — the popup sandbox: every popup, opened by click with mock data and no session.
+  // It has to take over here, before the session is restored and the auth flow starts.
+  // The literal `import.meta.env.DEV` is not redundant with `IS_POPUP_SANDBOX` (which already
+  // implies it): only a `false` right at the call site makes rolldown drop the dynamic import
+  // before chunking, and with it the whole sandbox chunk. Behind the imported const alone the
+  // branch still folds away, but a ~150 KB orphan chunk is emitted that nothing ever loads.
+  if(import.meta.env.DEV && IS_POPUP_SANDBOX) {
+    // `bootstrapState` goes first, on its own: see the note at the top of that module.
+    await import('@components/popupSandbox/bootstrapState');
+    const {startPopupSandbox} = await import('@components/popupSandbox');
+    await startPopupSandbox();
+    return;
+  }
+
+  // the media editor the sign-up screen opens for the new account's photo mounts the app's top level, which nothing
+  // has loaded yet then
+  setHotReloadGuardLoader(() => import('./pages/bootstrapIm').then(({importAppTopLevel}) => importAppTopLevel()));
+
+  rootScope.managers = getProxiedManagers();
   await checkLastActiveAccountFromTMe();
 
   if(IS_INSTALL_PROMPT_SUPPORTED) {
@@ -435,8 +463,7 @@ function setDocumentLangPackProperties(langPack: LangPackDifference.langPackDiff
     appChatBackground.attach();
     appChatBackground.setBackground({transition: 'instant'});
 
-    const langPack = await I18n.getCacheLangPackAndApply();
-    setDocumentLangPackProperties(langPack);
+    await I18n.getCacheLangPackAndApply();
 
     if(IS_BETA) import('./pages/bootstrapIm'); // cache it
     // const settings = await commonStateStorage.get('settings');
@@ -511,7 +538,7 @@ function setDocumentLangPackProperties(langPack: LangPackDifference.langPackDiff
   themeController.setThemeListener();
 
   // * fetch lang pack updates
-  if((langPack.localVersion !== App.langPackLocalVersion || true) && IS_BETA) {
+  if((langPack.localVersion !== I18n.getLocalVersion() || true) && IS_BETA) {
     I18n.getLangPackAndApply(langPack.lang_code);
   } else {
     checkLangPackForUpdates();
@@ -544,19 +571,18 @@ function setDocumentLangPackProperties(langPack: LangPackDifference.langPackDiff
   appChatBackground.attach();
   appChatBackground.setBackground({transition: 'instant'});
 
-  setDocumentLangPackProperties(langPack);
-
   let authState = stateResult.state.authState;
 
   const hash = location.hash;
   const splitted = hash.split('?');
   const params = parseUriParamsLine(splitted[1] ?? splitted[0].slice(1));
+  const webAuthTokenIsTest = params.tgWebAuthTest !== undefined && !!+params.tgWebAuthTest;
   if(params.tgWebAuthToken && authState._ !== 'authStateSignedIn') {
     const data: AuthState.signImport['data'] = {
       token: params.tgWebAuthToken,
       dcId: +params.tgWebAuthDcId,
       userId: params.tgWebAuthUserId.toUserId(),
-      isTest: params.tgWebAuthTest !== undefined && !!+params.tgWebAuthTest,
+      isTest: webAuthTokenIsTest,
       tgAddr: params.tgaddr
     };
 
@@ -573,6 +599,13 @@ function setDocumentLangPackProperties(langPack: LangPackDifference.langPackDiff
     }
 
     rootScope.managers.appStateManager.pushToState('authState', authState = {_: 'authStateSignImport', data});
+  }
+
+  // Already signed in, so the import above never ran and the token is left
+  // hanging — a token for the other environment is unreachable from here, the
+  // rest is ours to drop.
+  if(params.tgWebAuthToken && authState._ === 'authStateSignedIn' && webAuthTokenIsTest === Modes.test) {
+    rootScope.managers.appAccountManager.cancelWebTokenAuthorization(params.tgWebAuthToken, +params.tgWebAuthDcId);
   }
 
   if(params.tgWebAuthToken) {

@@ -6,7 +6,7 @@ $row-border-radius: $border-radius-medium;
 .row {
   min-height: 3.5rem;
   position: relative;
-  padding-block: .4375rem;
+  padding-block: .375rem;
   padding-inline: 1rem;
   display: flex;
   flex-direction: column;
@@ -15,12 +15,10 @@ $row-border-radius: $border-radius-medium;
 
   &.no-subtitle,
   &.row-small {
-    min-height: 3rem;
-    padding-top: .1875rem;
-    padding-bottom: .1875rem;
+    min-height: 3.375rem;
   }
 
-  @include animation-level(2) {
+  @include animation-level(1) {
     transition: opacity var(--transition-standard-in);
   }
 
@@ -34,21 +32,8 @@ $row-border-radius: $border-radius-medium;
       opacity: var(--disabled-opacity);
     }
 
-    .checkbox-field-toggle {
+    .row-checkbox-field-toggle {
       --primary-color: var(--secondary-color);
-    }
-  }
-
-  &.no-wrap {
-    padding-top: 0 !important;
-    padding-bottom: 0 !important;
-
-    br {
-      content: " ";
-
-      &:after {
-        content: " ";
-      }
     }
   }
 
@@ -56,6 +41,13 @@ $row-border-radius: $border-radius-medium;
     position: relative;
     z-index: 1;
     pointer-events: all;
+  }
+
+  // A toggle in the right column is a control of its own beside what the row's click does
+  // (a weekday's switch on a row that opens the day) — unlike the row's own toggle, which
+  // the whole row flips through its label.
+  &-right > .checkbox-field-toggle {
+    pointer-events: auto;
   }
 
   &-title-row,
@@ -80,7 +72,8 @@ $row-border-radius: $border-radius-medium;
       grid-template-areas: "left title right";
       grid-template-rows: auto;
 
-      .row-title {
+      .row-title,
+      .row-title-row {
         align-self: unset;
       }
     }
@@ -95,17 +88,36 @@ $row-border-radius: $border-radius-medium;
       align-self: flex-end;
     }
 
+    .row-title-row {
+      grid-area: title;
+      align-self: flex-end;
+      min-width: 0;
+    }
+
     .row-subtitle {
       grid-area: subtitle;
       align-self: flex-start;
     }
 
-    .row-midtitle {
+    .row-subtitle-row {
+      grid-area: subtitle;
+      align-self: flex-start;
+      min-width: 0;
+    }
+
+    .row-midtitle,
+    .row-midtitle-row {
       grid-area: midtitle;
       align-self: flex-start;
     }
 
-    .checkbox-field {
+    .row-midtitle-row {
+      min-width: 0;
+    }
+
+    // the row's OWN checkbox, which the grid gives a column of its own — a toggle nested in
+    // `.row-right` or in the title row must keep its natural width
+    > .row-checkbox-field {
       --offset-left: 0 !important;
       grid-area: left;
       width: 3.5rem;
@@ -129,7 +141,6 @@ $row-border-radius: $border-radius-medium;
 
   &-big {
     min-height: 4.5rem;
-    padding-block: .5625rem;
     padding-inline: 1rem .75rem;
   }
 
@@ -139,6 +150,7 @@ $row-border-radius: $border-radius-medium;
     align-items: center;
 
     .row-title,
+    .row-midtitle,
     .row-subtitle {
       @include text-overflow(true);
       min-width: 0;
@@ -151,7 +163,9 @@ $row-border-radius: $border-radius-medium;
     }
   }
 
+  &-midtitle-row,
   &-subtitle-row,
+  & > &-midtitle,
   & > &-subtitle {
     order: 1;
   }
@@ -170,13 +184,19 @@ $row-border-radius: $border-radius-medium;
     @include text-overflow(false);
 
     &-right {
+      &-with-control {
+        display: flex;
+        align-items: center;
+        gap: .5rem;
+      }
+
       &-secondary {
         color: var(--secondary-text-color);
       }
 
       .input-clear {
         color: inherit;
-        text-align: right;
+        text-align: end;
         pointer-events: all;
         cursor: text;
       }
@@ -185,7 +205,7 @@ $row-border-radius: $border-radius-medium;
     &-row {
       &.with-delimiter {
         .row-title:first-child {
-          border-right: 1px solid var(--border-color);
+          border-inline-end: 1px solid var(--border-color);
         }
       }
     }
@@ -207,6 +227,7 @@ $row-border-radius: $border-radius-medium;
   }
 
   &-title-right,
+  &-midtitle-right,
   &-subtitle-right {
     flex: 0 0 auto !important;
     margin-inline-start: 1rem;
@@ -223,7 +244,6 @@ $row-border-radius: $border-radius-medium;
     font-size: var(--font-size-14);
     line-height: 20px;
     margin: 1px 0 -1px;
-    order: 1;
   }
 
   &-with-padding {
@@ -236,8 +256,15 @@ $row-border-radius: $border-radius-medium;
     /* .row-title */
     .row-icon {
       position: absolute;
-      inset-inline-start: 1rem;
+      inset-inline-start: .75rem;
+      width: 1.875rem;
+      height: 1.875rem;
+      border-radius: .625rem;
+      display: flex;
+      align-items: center;
+      justify-content: center;
       font-size: 1.5rem;
+      line-height: 1;
       color: var(--secondary-text-color);
       pointer-events: none;
       z-index: 1;
@@ -245,6 +272,15 @@ $row-border-radius: $border-radius-medium;
       // margin-top: -.125rem;
       top: 50%;
       transform: translateY(-50%);
+
+      &-icon {
+        font-size: inherit;
+        line-height: inherit;
+      }
+
+      &-colored {
+        color: #fff;
+      }
 
       &-premium-color {
         color: var(--primary-color);
@@ -296,6 +332,15 @@ $row-border-radius: $border-radius-medium;
       opacity: 0;
     }
 
+    &-handle {
+      pointer-events: auto;
+      cursor: grab;
+
+      html.is-touch & {
+        opacity: 1;
+      }
+    }
+
     &.cant-sort {
       .row-sortable-icon {
         display: none;
@@ -328,62 +373,54 @@ $row-border-radius: $border-radius-medium;
       }
     }
 
-    .is-reordering & {
-      @include animation-level(2) {
-        transition: transform var(--transition-standard-in);
-      }
-    }
+    @include sortable-item-transition();
   }
 
-  .radio-field-main, 
-  .checkbox-field {
-    padding-inline-start: 3.375rem;
-    margin-inline-start: -3.375rem;
+  .row-radio-field .radio-field-main, 
+  .row-checkbox-field {
+    padding-inline-start: 3.5rem;
+    margin-inline-start: -3.5rem;
   }
 
-  .radio-field,
-  .radio-field:not(.radio-field-right) .radio-field-main,
-  .checkbox-field {
+  .row-radio-field,
+  .row-radio-field .radio-field-main {
     position: unset;
   }
   
-  .radio-field,
-  .checkbox-field,
+  .row-radio-field,
   .offset-left {
     --offset-left: 1rem;
   }
 
-  .radio-field {
+  .row-radio-field {
     margin-top: 0;
     margin-bottom: 0;
+
+    &.radio-field-right {
+      --offset-left: 0px;
+      width: var(--size);
+      height: var(--size);
+      display: block;
+      flex: none;
+
+      .radio-field-main {
+        width: 100%;
+        height: 100%;
+        margin: 0;
+        padding: 0;
+        position: relative;
+      }
+    }
   }
 
-  .checkbox-field {
+  .row-checkbox-field {
     margin-top: 0;
     margin-inline-end: 0;
     margin-bottom: 0;
     height: auto;
+    position: absolute;
 
-    .checkbox-caption {
-      padding-inline-start: 0;
-      white-space: pre-wrap;
-      overflow: unset;
-      text-overflow: unset;
-    }
-
-    &-toggle {
-      margin-inline: .125rem .125rem;
-      padding: 0;
-    }
-
-    &-absolute {
-      position: absolute;
-      margin: 0 !important;
-      padding: 0 !important;
-      left: 0;
-    }
-
-    &-round {
+    &.checkbox-field-round {
       .checkbox-box-border {
         z-index: unset;
       }
@@ -443,12 +480,40 @@ $row-border-radius: $border-radius-medium;
     }
   }
 
+  // A leading selection control followed by media, shared with AppSelectPeers.
+  $selection-width: 3rem;
+
+  &-with-checkbox-and-media {
+    &.row-with-padding {
+      padding-inline-start: #{4.5rem + $selection-width} !important;
+    }
+  }
+
+  &-selection-media {
+    margin-inline-start: $selection-width !important;
+  }
+
+  &-selection-checkbox {
+    inset-inline-start: 1.25rem !important;
+
+    // a checkbox registered through `Row` is positioned against the row's text; this one leads
+    // the row instead, so that offset has to go
+    &.row-checkbox-field {
+      padding-inline-start: 0 !important;
+      margin-inline-start: 0 !important;
+    }
+  }
+
+  &-selection-radio.row-radio-field {
+    --offset-left: 1.25rem;
+  }
+
   &.menu-open {
     background-color: var(--light-secondary-text-color);
   }
 
   &.accordion-toggler {
-    .checkbox-field-toggle {
+    .row-checkbox-field-toggle {
       pointer-events: all !important;
     }
   }

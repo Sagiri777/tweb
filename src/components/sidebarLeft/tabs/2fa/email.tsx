@@ -3,16 +3,15 @@ import Button from '@components/buttonTsx';
 import InputField from '@components/inputField';
 import {InputFieldTsx} from '@components/inputFieldTsx';
 import {putPreloader} from '@components/putPreloader';
-import {AppTwoStepVerificationEmailConfirmationTab, AppTwoStepVerificationSetTab} from '@components/solidJsTabs/tabs';
-import PopupPeer from '@components/popups/peer';
+import showPeerPopup from '@components/popups/peer';
 import cancelEvent from '@helpers/dom/cancelEvent';
 import {canFocus} from '@helpers/dom/canFocus';
 import matchEmail from '@lib/richTextProcessor/matchEmail';
 import Section from '@components/section';
-import PopupElement from '@components/popups';
 import {useSuperTab} from '@components/solidJsTabs/superTabProvider';
 import {useHotReloadGuard} from '@lib/solidjs/hotReloadGuard';
 import type {AppTwoStepVerificationEmailTab} from '@components/solidJsTabs/tabs';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 const TwoStepVerificationEmail: Component = () => {
   const [tab] = useSuperTab<typeof AppTwoStepVerificationEmailTab>();
@@ -47,7 +46,7 @@ const TwoStepVerificationEmail: Component = () => {
   };
 
   const goNext = () => {
-    tab.slider.createTab(AppTwoStepVerificationSetTab).open({messageFor: justSetPasssword ? 'password' : 'email'});
+    tab.slider.createTab(hotReloadGuard.tabs.AppTwoStepVerificationSetTab).open({messageFor: justSetPasssword ? 'password' : 'email'});
   };
 
   const onContinueClick = () => {
@@ -72,7 +71,7 @@ const TwoStepVerificationEmail: Component = () => {
       if(err.type.includes('EMAIL_UNCONFIRMED')) {
         const symbols = +err.type.match(/^EMAIL_UNCONFIRMED_(\d+)/)[1];
 
-        tab.slider.createTab(AppTwoStepVerificationEmailConfirmationTab).open({
+        tab.slider.createTab(hotReloadGuard.tabs.AppTwoStepVerificationEmailConfirmationTab).open({
           state,
           email,
           length: symbols,
@@ -88,7 +87,7 @@ const TwoStepVerificationEmail: Component = () => {
   };
 
   const onSkipClick = () => {
-    const popup = PopupElement.createPopup(PopupPeer, 'popup-skip-email', {
+    showPeerPopup('popup-skip-email', {
       buttons: [{
         langKey: 'Cancel',
         isCancel: true
@@ -113,8 +112,6 @@ const TwoStepVerificationEmail: Component = () => {
       titleLangKey: 'YourEmailSkipWarning',
       descriptionLangKey: 'YourEmailSkipWarningText'
     });
-
-    popup.show();
   };
 
   onMount(() => {

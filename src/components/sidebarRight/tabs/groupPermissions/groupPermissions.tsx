@@ -4,14 +4,13 @@ import findUpTag from '@helpers/dom/findUpTag';
 import replaceContent from '@helpers/dom/replaceContent';
 import ScrollableLoader from '@helpers/scrollableLoader';
 import {ChannelParticipant, Chat, ChatBannedRights, ChatFull} from '@layer';
-import appDialogsManager, {DialogDom, DIALOG_LIST_ELEMENT_TAG} from '@lib/appDialogsManager';
+import {DialogDom, DIALOG_LIST_ELEMENT_TAG} from '@components/dialogElement';
 import getPeerId from '@appManagers/utils/peers/getPeerId';
 import {i18n, join, LangPackKey} from '@lib/langPack';
 import rootScope from '@lib/rootScope';
 import showPickUserPopup from '@components/popups/pickUser';
-import Row from '@components/row';
+import RowTsx from '@components/rowTsx';
 import Section from '@components/section';
-import {openUserPermissionsTab} from '@components/solidJsTabs/tabs';
 import wrapPeerTitle from '@components/wrappers/peerTitle';
 import apiManagerProxy from '@lib/apiManagerProxy';
 import RangeStepsSelector from '@components/rangeStepsSelector';
@@ -25,6 +24,8 @@ import {useSuperTab} from '@components/solidJsTabs/superTabProvider';
 import {usePromiseCollector} from '@components/solidJsTabs/promiseCollector';
 import {useHotReloadGuard} from '@lib/solidjs/hotReloadGuard';
 import type {AppGroupPermissionsTab} from '@components/solidJsTabs/tabs';
+import {wrapSolidComponent} from '@helpers/solid/wrapSolidComponent';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 const GroupPermissions: Component = () => {
   const [tab] = useSuperTab<typeof AppGroupPermissionsTab>();
@@ -202,26 +203,24 @@ const GroupPermissions: Component = () => {
         const participantsCount = (chatFull as ChatFull.channelFull).participants_count ||
           channel.participants_count || 0;
         if(participantsCount >= config.megagroup_size_max - 1000) {
-          const row = new Row({
-            titleLangKey: 'BroadcastGroupConvert',
-            icon: 'newgroup_filled',
-            clickable: () => {
+          const row = wrapSolidComponent(() => (
+            <RowTsx clickable={() => {
               showConvertToGigagroupPopup(chatId);
-            },
-            listenerSetter: tab.listenerSetter
-          });
+            }}>
+              <RowTsx.Icon icon="newgroup_filled" />
+              <RowTsx.Title>{i18n('BroadcastGroupConvert')}</RowTsx.Title>
+            </RowTsx>
+          ), tab.middlewareHelper.get());
 
-          setConvertRow(row.container);
+          setConvertRow(row);
         }
       }
     }
 
     {
-      const addExceptionRow = new Row({
-        titleLangKey: 'ChannelAddException',
-        subtitleLangKey: 'Loading',
-        icon: 'adduser',
-        clickable: () => {
+      let addExceptionSubtitle: HTMLDivElement;
+      const addExceptionRow = wrapSolidComponent(() => (
+        <RowTsx clickable={() => {
           showPickUserPopup({
             titleLangKey: 'Exceptions',
             peerType: ['channelParticipants'],
@@ -234,9 +233,12 @@ const GroupPermissions: Component = () => {
             peerId: -chatId,
             exceptSelf: true
           });
-        },
-        listenerSetter: tab.listenerSetter
-      });
+        }}>
+          <RowTsx.Icon icon="adduser" />
+          <RowTsx.Title>{i18n('ChannelAddException')}</RowTsx.Title>
+          <RowTsx.Subtitle ref={addExceptionSubtitle}>{i18n('Loading')}</RowTsx.Subtitle>
+        </RowTsx>
+      ), tab.middlewareHelper.get());
 
       const openPermissions = async(peerId: PeerId) => {
         let participant = participants.get(peerId);
@@ -248,12 +250,12 @@ const GroupPermissions: Component = () => {
           }
         }
 
-        openUserPermissionsTab(tab.slider, chatId, participant);
+        hotReloadGuard.tabs.openUserPermissionsTab(tab.slider, chatId, participant);
       };
 
-      exceptionsAdd.append(addExceptionRow.container);
+      exceptionsAdd.append(addExceptionRow);
 
-      const list = appDialogsManager.createChatList({new: true});
+      const list = hotReloadGuard.appDialogsManager.createChatList({new: true});
       exceptionsList.append(list);
 
       attachClickEvent(list, (e) => {
@@ -291,7 +293,7 @@ const GroupPermissions: Component = () => {
 
       const add = (participant: ChannelParticipant.channelParticipantBanned, append: boolean) => {
         const peerId = getPeerId(participant.peer);
-        const dialogElement = appDialogsManager.addDialogNew({
+        const dialogElement = hotReloadGuard.appDialogsManager.addDialogNew({
           peerId,
           container: list,
           rippleEnabled: true,
@@ -348,7 +350,7 @@ const GroupPermissions: Component = () => {
 
       const setLength = () => {
         const el = i18n(exceptionsCount ? 'Permissions.ExceptionsCount' : 'Permissions.NoExceptions', [exceptionsCount]);
-        replaceContent(addExceptionRow.subtitle, el);
+        replaceContent(addExceptionSubtitle, el);
       };
 
       let exceptionsCount = 0;
