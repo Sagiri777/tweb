@@ -22,6 +22,7 @@ import getPeerId from '@appManagers/utils/peers/getPeerId';
 import callbackify from '@helpers/callbackify';
 import {SlicedCachedFetcher} from '@appManagers/utils/chats/slicedCachedFetcher';
 import {CHAT_LEGACY_ADMIN_RIGHTS} from '@lib/appManagers/utils/chats/constants';
+import {appSettings} from '@stores/appSettings';
 import {getStickerSetInputById} from '@lib/appManagers/utils/stickers/getStickerSetInput';
 
 export type Channel = Chat.channel;
@@ -1377,6 +1378,10 @@ export class AppChatsManager extends AppManager {
   }
 
   public getSponsoredPeers(q: string) {
+    if(this.rootScope.premium || appSettings.proMode) {
+      return Promise.resolve([]);
+    }
+
     return this.apiManager.invokeApiSingleProcess({
       method: 'contacts.getSponsoredPeers',
       params: {q},
