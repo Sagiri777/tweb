@@ -38,15 +38,20 @@ export function setIgnoredRestrictionReasons(ignored: IgnoredRestrictionReasons)
 
 export function getRestrictionReason(reasons: RestrictionReason[], ignored = pageIgnored) {
   // return reasons[0];
+  if(ignored.has('all')) return;
   return reasons.find((reason) => platforms.has(reason.platform) && !ignored.has(reason.reason));
 }
 
 export function isSensitive(reasons: RestrictionReason[], ignored = pageIgnored) {
-  if(ignored.has(SENSITIVE_RESTRICTION_REASON)) return false;
+  if(ignored.has('all') || ignored.has(SENSITIVE_RESTRICTION_REASON)) return false;
   // * only this client's platforms, as tdesktop and Android do: a mark for one app store is not for the web
   return reasons.some((reason) => reason.reason === SENSITIVE_RESTRICTION_REASON && platforms.has(reason.platform));
 }
 
 export function isRestricted(reasons: RestrictionReason[], ignored = pageIgnored) {
   return !!getRestrictionReason(reasons, ignored);
+}
+
+export function ignoreRestrictionReasons(reasons: string[]) {
+  pageIgnored = new Set(reasons);
 }

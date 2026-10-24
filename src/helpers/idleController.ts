@@ -5,6 +5,7 @@ import {getAppWindow, onAppWindowChange} from '@helpers/appWindow';
 
 const FOCUS_EVENT_NAME = IS_TOUCH_SUPPORTED ? 'touchstart' : 'mousemove';
 const DO_NOT_IDLE = IS_PREVIEW; // the preview window is never focused — don't let it look idle
+const HAS_WINDOW = typeof window !== 'undefined';
 
 export class IdleController extends EventListenerBase<{
   change: (idle: boolean) => void
@@ -25,9 +26,13 @@ export class IdleController extends EventListenerBase<{
   constructor() {
     super();
 
-    this._isIdle = !DO_NOT_IDLE;
+    this._isIdle = HAS_WINDOW && !DO_NOT_IDLE;
     this.focusPromise = Promise.resolve();
     this.focusResolve = () => {};
+
+    if(!HAS_WINDOW) {
+      return;
+    }
 
     // Track blur/focus/activity on whichever window the app currently lives in — the tab, or the
     // Document PiP window while popped out. Bound to the MAIN window only, the app would look idle the

@@ -23,9 +23,16 @@ export default async function createNotificationImage(
     }
   }
 
+  if(typeof document === 'undefined' || typeof window === 'undefined') {
+    return undefined;
+  }
+
   if(!avatarCanvas) {
     avatarCanvas = document.createElement('canvas');
     avatarContext = avatarCanvas.getContext('2d');
+    if(!avatarContext) {
+      return undefined;
+    }
 
     const SIZE = 54;
     const dpr = 1;
