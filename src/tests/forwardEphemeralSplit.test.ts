@@ -3,6 +3,9 @@ import {AppMessagesIdsManager} from '@appManagers/appMessagesIdsManager';
 import {EPHEMERAL_MESSAGE_ID_OFFSET} from '@appManagers/constants';
 import {Message} from '@layer';
 import '@helpers/peerIdPolyfill';
+import {setAppSettingsSilent} from '@stores/appSettings';
+
+beforeEach(() => setAppSettingsSilent('forwarding', {sendAsCopy: false}));
 
 const CHAT_ID = 777 as ChatId;
 const FROM_PEER_ID = CHAT_ID.toPeerId(true);
@@ -19,6 +22,7 @@ function makeManager() {
   Object.assign(manager, {
     appPeersManager: {
       isChannel: (peerId: PeerId) => peerId === FROM_PEER_ID,
+      noForwards: () => false,
       getPeerMigratedTo: (): PeerId => undefined
     },
     appMessagesIdsManager: new AppMessagesIdsManager(),

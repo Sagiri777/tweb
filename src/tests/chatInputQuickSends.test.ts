@@ -3,6 +3,7 @@ import '@helpers/peerIdPolyfill';
 import ChatInput from '@components/chat/input';
 import {ChatType} from '@components/chat/chatType';
 import {mountChatInputEditor} from '@/tests/helpers/chatInputEditor';
+import {setAppSettingsSilent} from '@stores/appSettings';
 
 vi.mock('@lib/appImManager', () => ({AppImManager: class {}, APP_TABS: {}, default: {}}));
 
@@ -24,6 +25,7 @@ afterEach(() => {
 type Sent = {text: string, replyToMsgId: number, silent: boolean, scheduleDate: number};
 
 function setup() {
+  setAppSettingsSilent('forwarding', {sendAsCopy: false});
   mounted = mountChatInputEditor();
   const {editor, input} = mounted;
   const sent: Sent[] = [];

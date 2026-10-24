@@ -2,6 +2,9 @@ import {describe, expect, test, vi} from 'vitest';
 import '@helpers/peerIdPolyfill';
 import {AppMessagesManager} from '@appManagers/appMessagesManager';
 import type {InputPeer, Message, Updates} from '@layer';
+import {setAppSettingsSilent} from '@stores/appSettings';
+
+beforeEach(() => setAppSettingsSilent('forwarding', {sendAsCopy: false}));
 
 const sourcePeerId = (42 as UserId).toPeerId(false);
 const targetPeerId = (43 as UserId).toPeerId(false);
@@ -76,6 +79,7 @@ function makeManager(options: {premium: boolean, rich: boolean}) {
       peerId: selfPeerId,
       getInputPeerById: vi.fn(() => inputPeer),
       getPeerMigratedTo: vi.fn(),
+      noForwards: vi.fn().mockReturnValue(false),
       isBotforum: vi.fn().mockReturnValue(false),
       isChannel: vi.fn().mockReturnValue(false)
     },

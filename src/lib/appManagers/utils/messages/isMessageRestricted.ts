@@ -19,7 +19,7 @@ export default function isMessageRestricted(message: Message.message) {
   return !!getMessageRestrictionReason(message);
 }
 
-export function isMessageSensitive(message) {
+export function isMessageSensitive(message: Message) {
   if(appSettings.proMode) {
     return false;
   }

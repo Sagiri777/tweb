@@ -5114,7 +5114,7 @@ export default class ChatInput {
     // * fork: a copy forward asks how to treat self-destruct media before anything goes
     const sendForwardsAsCopy = forwarding ? (this.forwardingSendAsCopy ?? appSettings.forwarding.sendAsCopy) : false;
     const forwardPreserveTtl = forwarding ? await this.getForwardPreserveTtlChoice(sendForwardsAsCopy) : undefined;
-    if(forwardPreserveTtl === undefined || !isCurrent()) {
+    if((forwarding && forwardPreserveTtl === undefined) || !isCurrent()) {
       return;
     }
 

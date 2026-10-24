@@ -3,8 +3,6 @@ import {THREADED_WORKER_PROTOCOL_QUERY_PARAM} from '@lib/threadedWorkerTypes';
 
 const HAS_WINDOW = typeof window !== 'undefined';
 const HAS_LOCATION = typeof location !== 'undefined';
-const HAS_WORKER = typeof Worker !== 'undefined';
-const HAS_SHARED_WORKER = typeof SharedWorker !== 'undefined';
 
 export function makeWorkerURL(url: string | URL) {
   if(!(url instanceof URL)) {
@@ -26,7 +24,7 @@ export function makeWorkerURL(url: string | URL) {
 }
 
 export default function setWorkerProxy() {
-  if(!HAS_WINDOW || (!HAS_WORKER && !HAS_SHARED_WORKER)) {
+  if(!HAS_WINDOW) {
     return;
   }
 
@@ -39,8 +37,8 @@ export default function setWorkerProxy() {
   };
 
   [
-    HAS_WORKER && Worker,
-    HAS_SHARED_WORKER && SharedWorker
+    typeof Worker !== 'undefined' && Worker,
+    typeof SharedWorker !== 'undefined' && SharedWorker
   ].filter(Boolean).forEach((w) => {
     window[w.name as any] = new Proxy(w, workerHandler);
   });

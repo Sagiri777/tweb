@@ -26,16 +26,17 @@ import {getMiddleware} from '@helpers/middleware';
 import {SEND_WHEN_ONLINE_TIMESTAMP} from '@appManagers/constants';
 import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
+import type {AppManagers} from '@lib/managers';
 import shouldResendForwardAsCopy from '@appManagers/utils/messages/shouldResendForwardAsCopy';
 import RowTsx from '@components/rowTsx';
 import CheckboxFieldTsx from '@components/checkboxFieldTsx';
 import showForwardSelfDestructPopup from '@components/popups/forwardSelfDestruct';
 
-async function resolveChatRightsActions(peerIdMids: {[fromPeerId: PeerId]: number[]}): Promise<ChatRights[]> {
+async function resolveChatRightsActions(peerIdMids: {[fromPeerId: PeerId]: number[]}, managers: AppManagers): Promise<ChatRights[]> {
   const messagesPromises = Object.keys(peerIdMids).map((peerId) => {
     const mids = peerIdMids[peerId as any as number];
     return mids.map((mid) => {
-      return rootScope.managers.appMessagesManager.getMessageByPeer(peerId.toPeerId(), mid);
+      return managers.appMessagesManager.getMessageByPeer(peerId.toPeerId(), mid);
     });
   });
 
@@ -96,11 +97,11 @@ async function resolveChatRightsActions(peerIdMids: {[fromPeerId: PeerId]: numbe
   return Array.from(actions);
 }
 
-async function resolveForceSendAsCopy(peerIdMids: {[fromPeerId: PeerId]: number[]}): Promise<boolean> {
+async function resolveForceSendAsCopy(peerIdMids: {[fromPeerId: PeerId]: number[]}, managers: AppManagers): Promise<boolean> {
   const messagesPromises = Object.keys(peerIdMids).map((peerId) => {
     const mids = peerIdMids[peerId as any as number];
     return mids.map((mid) => {
-      return rootScope.managers.appMessagesManager.getMessageByPeer(peerId.toPeerId(), mid);
+      return managers.appMessagesManager.getMessageByPeer(peerId.toPeerId(), mid);
     });
   });
 
@@ -108,7 +109,7 @@ async function resolveForceSendAsCopy(peerIdMids: {[fromPeerId: PeerId]: number[
   const results = await Promise.all(messages.map(async(message) => {
     return shouldResendForwardAsCopy(
       message as Message.message,
-      message ? await rootScope.managers.appPeersManager.noForwards(message.peerId) : false,
+      message ? await managers.appPeersManager.noForwards(message.peerId) : false,
       appSettings.forwarding.sendAsCopy
     );
   }));
@@ -123,7 +124,7 @@ export default async function showForwardPopup(
   onClose?: () => void
 ) {
   const managers = bindManagersToSession(rootScope.managers);
-  const chatRightsActions = peerIdMids ? await resolveChatRightsActions(peerIdMids) : [];
+  const chatRightsActions = peerIdMids ? await resolveChatRightsActions(peerIdMids, managers) : [];
   if(!chatRightsActions.length) {
     chatRightsActions.push('send_plain');
   }
@@ -145,7 +146,7 @@ export default async function showForwardPopup(
   const {message_length_max: MAX_MESSAGE_LENGTH} = await managers.apiManager.getConfig();
 
   // fork: "forward without source" — forced when the selection can't go through Telegram forwarding
-  const forceSendAsCopy = peerIdMids ? await resolveForceSendAsCopy(peerIdMids) : false;
+  const forceSendAsCopy = peerIdMids ? await resolveForceSendAsCopy(peerIdMids, managers) : false;
   const [sendAsCopy, setSendAsCopy] = createSignal(forceSendAsCopy || appSettings.forwarding.sendAsCopy);
 
   const listenerSetter = new ListenerSetter();

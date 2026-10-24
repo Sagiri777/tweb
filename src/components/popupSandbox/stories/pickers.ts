@@ -177,6 +177,14 @@ defineStories('Pickers', [
     }
   },
   {
+    id: 'forwardSelfDestruct',
+    title: 'Forward self-destructing media',
+    open: async() => {
+      const {default: showForwardSelfDestructPopup} = await import('@components/popups/forwardSelfDestruct');
+      showForwardSelfDestructPopup();
+    }
+  },
+  {
     id: 'shareUrl',
     title: 'Share a link',
     open: async(ctx) => {
