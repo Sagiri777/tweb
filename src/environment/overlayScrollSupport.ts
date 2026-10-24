@@ -1,4 +1,4 @@
-import {createMemo} from 'solid-js';
+import {createMemo, createRoot} from 'solid-js';
 import {CHROMIUM_VERSION, IS_CHROMIUM, IS_MOBILE, IS_MOBILE_SAFARI, IS_SAFARI} from '@environment/userAgent';
 import scrollbarWidth from '@helpers/dom/scrollbarWidth';
 
@@ -9,5 +9,9 @@ const STATIC_OVERLAY_SCROLL = IS_MOBILE ||
   CHROMIUM_VERSION < 113 ||
   CHROMIUM_VERSION >= 145;
 
-export const IS_OVERLAY_SCROLL_SUPPORTED = createMemo(() => STATIC_OVERLAY_SCROLL && scrollbarWidth() === 0);
-export const USE_CUSTOM_SCROLL = createMemo(() => !USE_NATIVE_SCROLL && !IS_OVERLAY_SCROLL_SUPPORTED());
+export const [IS_OVERLAY_SCROLL_SUPPORTED, USE_CUSTOM_SCROLL] = createRoot(() => {
+  const isOverlayScrollSupported = createMemo(() => STATIC_OVERLAY_SCROLL && scrollbarWidth() === 0);
+  const useCustomScroll = createMemo(() => !USE_NATIVE_SCROLL && !isOverlayScrollSupported());
+
+  return [isOverlayScrollSupported, useCustomScroll] as const;
+});

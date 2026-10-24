@@ -1,4 +1,5 @@
 import {getRestrictionReason, isSensitive, SENSITIVE_RESTRICTION_REASON} from '@helpers/restrictions';
+import {appSettings} from '@stores/appSettings';
 import {Message} from '@layer';
 
 /**
@@ -11,9 +12,17 @@ export function getMessageRestrictionReason(message: Message.message) {
 }
 
 export default function isMessageRestricted(message: Message.message) {
+  if(appSettings.proMode) {
+    return false;
+  }
+
   return !!getMessageRestrictionReason(message);
 }
 
-export function isMessageSensitive(message: Message) {
+export function isMessageSensitive(message) {
+  if(appSettings.proMode) {
+    return false;
+  }
+
   return (message._ === 'message' && message.restriction_reason != null && isSensitive(message.restriction_reason));
 }
