@@ -9,7 +9,7 @@ import autoprefixer from 'autoprefixer';
 import {resolve} from 'path';
 import {existsSync, copyFileSync, readFileSync, realpathSync} from 'fs';
 import {createHash} from 'crypto';
-import {Plugin, ServerOptions} from 'vite';
+import {Plugin, ServerOptions, ViteDevServer} from 'vite';
 import {watchLangFile} from './watch-lang.js';
 import {watchScssTypes} from './scss-types.js';
 import {vitestWorkers} from './scripts/testQueue';
@@ -18,6 +18,10 @@ import settingsSearchPlugin from './scripts/settings-search-plugin.mjs';
 import watchTransformCache from './scripts/watch-transform-cache.mjs';
 import hotReloadPlugin from './scripts/hot-reload-plugin.mjs';
 import path from 'path';
+import {createRequire} from 'module';
+
+const require = createRequire(import.meta.url);
+const {attachNetworkProxy} = require('./networkProxyServer.js');
 
 const rootDir = resolve(__dirname);
 const certsDir = path.join(rootDir, 'certs');
@@ -220,6 +224,12 @@ function compileHintsPlugin(): Plugin {
 
 export default defineConfig({
   plugins: [
+    {
+      name: 'tweb-network-proxy',
+      configureServer(server: ViteDevServer) {
+        attachNetworkProxy(server.middlewares, server.httpServer);
+      }
+    },
     // devtools({
     //   /* features options - all disabled by default */
     //   autoname: true // e.g. enable autoname
@@ -298,6 +308,16 @@ export default defineConfig({
   // public/*.js build artifacts with merge-conflict markers) aborts the whole scan
   // and disables dependency pre-bundling — making cold dev loads slow and reload-prone.
   optimizeDeps: {
+    include: [
+      '@cryptography/aes',
+      'big-integer',
+      'fast-png',
+      'fflate',
+      'hls.js',
+      'js-md5',
+      'mp4-muxer',
+      'tinyld'
+    ],
     // Worker entry points are scanned too. A dep reached ONLY through a worker
     // (aes-js + libsodium-wrappers behind the conference's encrypt.worker, and
     // the mtproto worker's own set) is otherwise first seen when the worker is
