@@ -51,6 +51,7 @@ import {getCurrentNewMediaPopup} from '@components/popups/newMedia';
 import PriceChangedInterceptor from '@components/chat/priceChangedInterceptor';
 import {isVerificationBot} from '@components/chat/utils';
 import {isSensitive} from '@helpers/restrictions';
+import {appSettings} from '@stores/appSettings';
 import {isTempId} from '@appManagers/utils/messages/isTempId';
 import {usePeer} from '@stores/peers';
 import {useAppSettings} from '@stores/appSettings';
@@ -936,6 +937,10 @@ export default class Chat extends EventListenerBase<{
   }
 
   public get isSensitive() {
+    if(appSettings.proMode) {
+      return false;
+    }
+
     return isSensitive((this.peer as User.user).restriction_reason || []);
   }
 
@@ -1030,7 +1035,7 @@ export default class Chat extends EventListenerBase<{
       });
     }
 
-    this.isRestricted = isRestricted;
+    this.isRestricted = appSettings.proMode ? false : isRestricted;
 
     if(this.selection) {
       this.selection.isScheduled = type === ChatType.Scheduled;
