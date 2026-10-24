@@ -50,7 +50,7 @@ export interface AnimationItemWrapper {
 const NEVER_SHOWN_RECLAIM_TIMEOUT = 60000;
 
 export class AnimationIntersector {
-  private observer: IntersectionObserver;
+  private observer?: IntersectionObserver;
   private onObserve: (entries: IntersectionObserverEntry[]) => void;
   private visible: Set<AnimationItem>;
 
@@ -140,8 +140,12 @@ export class AnimationIntersector {
     // a `play`. Rebuild the observer against the active window and re-observe everything on every
     // pop-in/out. When the app window never changes (no PiP) this never fires.
     onAppWindowChange(() => {
-      this.observer.disconnect();
+      this.observer?.disconnect();
       this.createObserver();
+      if(!this.observer) {
+        return;
+      }
+
       for(const group in this.byGroups) {
         for(const item of this.byGroups[group as AnimationItemGroup]) {
           this.observer.observe(item.el);
@@ -157,6 +161,11 @@ export class AnimationIntersector {
   private createObserver() {
     // Active window's constructor → its viewport is the observer's implicit root (see onAppWindowChange).
     const IO = (getAppWindow() as Window & typeof globalThis).IntersectionObserver;
+    // * fork: worker realms have no IntersectionObserver - items are treated as always visible instead
+    if(!IO) {
+      return;
+    }
+
     this.observer = new IO(this.onObserve);
   }
 
@@ -233,7 +242,7 @@ export class AnimationIntersector {
     // stop getting callbacks entirely.
     if(!elementItems?.length) {
       this.byElement.delete(el);
-      this.observer.unobserve(el);
+      this.observer?.unobserve(el);
     }
 
     clearTimeout(player.staleTimer);
@@ -302,7 +311,11 @@ export class AnimationIntersector {
       this.byElement.set(item.el, elementItems = []);
     }
     elementItems.push(item);
-    this.observer.observe(item.el);
+    if(this.observer) {
+      this.observer.observe(item.el);
+    } else {
+      this.visible.add(item);
+    }
     this.byPlayer.set(animation, item);
   }
 
@@ -444,12 +457,16 @@ export class AnimationIntersector {
     }
 
     animations.forEach((animation) => {
-      this.observer.unobserve(animation.el);
+      this.observer?.unobserve(animation.el);
     });
 
     fastRaf(() => {
       animations.forEach((animation) => {
-        this.observer.observe(animation.el);
+        if(this.observer) {
+          this.observer.observe(animation.el);
+        } else {
+          this.visible.add(animation);
+        }
       });
     });
   }

@@ -10,6 +10,8 @@ import {getCurrentAccount} from '@lib/accounts/getCurrentAccount';
 import {getCurrentAccountFromURL} from '@lib/accounts/getCurrentAccountFromURL';
 import {createAppURLForAccount} from '@lib/accounts/createAppURLForAccount';
 
+const HAS_WINDOW = typeof window !== 'undefined';
+
 export type NavigationItem = {
   type: 'left' | 'right' | 'im' | 'chat' | 'popup' | 'media' | 'menu' |
     'esg' | 'multiselect' | 'input-helper' | 'autocomplete-helper' | 'markup' |
@@ -29,7 +31,7 @@ export type NavigationItem = {
   context?: any
 };
 
-export const USE_NAVIGATION_API = 'navigation' in window && !IS_FIREFOX;
+export const USE_NAVIGATION_API = HAS_WINDOW && 'navigation' in window && !IS_FIREFOX;
 const TRY_TO_TRAVERSE = USE_NAVIGATION_API && true; // * not tested for legacy api
 
 // * an entry of the history from before the tab switched accounts in place still names the previous one
@@ -60,13 +62,20 @@ export class AppNavigationController {
     this.manual = false;
     this.log = logger('NC');
     this.debug = true;
-    this.currentHash = window.location.hash;
+    this.currentHash = '';
     this.overriddenHash = '';
     this.isPossibleSwipe = false;
     this.ignoreNextNavigations = [];
     this.popping = false;
     this.modificationQueue = [];
     this.modificationBusy = false;
+    this.modificationResolve = undefined;
+
+    if(!HAS_WINDOW) {
+      return;
+    }
+
+    this.currentHash = window.location.hash;
 
     history.scrollRestoration = 'manual';
 
@@ -552,6 +561,10 @@ export class AppNavigationController {
   }
 
   public close() {
+    if(!HAS_WINDOW) {
+      return;
+    }
+
     try {
       window.close();
     } catch(e) {}
@@ -561,10 +574,18 @@ export class AppNavigationController {
    * Better to call from event
    */
   public focus() {
+    if(!HAS_WINDOW) {
+      return;
+    }
+
     window.focus();
   }
 
   public navigateToUrl(url: string) {
+    if(!HAS_WINDOW) {
+      return;
+    }
+
     if(USE_NAVIGATION_API) {
       navigation.removeEventListener('navigate', this.onNavigate);
     } else {
@@ -578,5 +599,5 @@ export class AppNavigationController {
 }
 
 const appNavigationController = new AppNavigationController();
-MOUNT_CLASS_TO.appNavigationController = appNavigationController;
+MOUNT_CLASS_TO && (MOUNT_CLASS_TO.appNavigationController = appNavigationController);
 export default appNavigationController;
