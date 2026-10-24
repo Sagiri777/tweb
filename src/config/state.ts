@@ -58,6 +58,7 @@ export type AutoDownloadPeerTypeSettings = {
 
 export type StateSettings = {
   messagesTextSize: number,
+  proMode: boolean,
   distanceUnit: 'kilometers' | 'miles',
   // Only written once the reader flips a story's weather widget; until then the unit follows the
   // locale, so there is nothing to store and no settings row to show (same as tdesktop).
@@ -127,6 +128,9 @@ export type StateSettings = {
   liteMode: {[key in LiteModeKey]: boolean},
   savedAsForum: boolean,
   notifyAllAccounts: boolean,
+  forwarding: {
+    sendAsCopy: boolean
+  },
   tabsInSidebar: boolean,
   /** Ids of the settings-search results picked last, most recent first. */
   settingsSearchRecent: string[],
@@ -453,6 +457,7 @@ const makeDefaultAppTheme = (name: AppTheme['name']): AppTheme => {
 
 export const SETTINGS_INIT: StateSettings = {
   messagesTextSize: 16,
+  proMode: false,
   distanceUnit: 'kilometers',
   sendShortcut: 'enter',
   autoDownload: {
@@ -548,6 +553,9 @@ export const SETTINGS_INIT: StateSettings = {
   },
   savedAsForum: false,
   notifyAllAccounts: true,
+  forwarding: {
+    sendAsCopy: false
+  },
   tabsInSidebar: false,
   settingsSearchRecent: [],
   playbackParams: {
