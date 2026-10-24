@@ -25,6 +25,7 @@ import TranslatableMessage from '@components/translatableMessage';
 import wrapMessageActionTextNew, {WrapMessageActionTextOptions} from '@components/wrappers/messageActionTextNew';
 import {wrapMessageGiveawayResults} from '@components/wrappers/messageActionTextNewUnsafe';
 import wrapPeerTitle from '@components/wrappers/peerTitle';
+import hasVisibleMessageMedia from '@appManagers/utils/messages/hasVisibleMessageMedia';
 import getMessagePreviewIcon from '@components/wrappers/messagePreviewIcon';
 import getMessageForReplyContent from '@components/wrappers/messageForReplyContent';
 import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
@@ -78,7 +79,9 @@ export default async function wrapMessageForReply<T extends WrapMessageForReplyO
   const getMyId = () => options.managers ? options.managers.rootScope.getMyId() : rootScope.myId;
 
   const isRestricted = isMessageRestricted(message as any);
-  const isSelfDestructingMedia = !!((message as Message.message).media as MessageMedia.messageMediaPhoto)?.ttl_seconds;
+  const isSelfDestructingMedia = message._ === 'message' &&
+    !!(message.media as MessageMedia.messageMediaPhoto)?.ttl_seconds &&
+    !hasVisibleMessageMedia(message);
 
   const someRichTextOptions: WrapRichTextOptions = {
     ...options,

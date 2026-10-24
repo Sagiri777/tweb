@@ -3,6 +3,7 @@ import '@lib/polyfill';
 import '@helpers/peerIdPolyfill';
 
 import cryptoWorker from '@lib/crypto/cryptoMessagePort';
+import {installGlobalNetworkProxy} from '@lib/networkProxy';
 import {setEnvironment} from '@environment/utils';
 import transportController from '@lib/mtproto/transports/controller';
 import MTProtoMessagePort from '@lib/mainWorker/mainMessagePort';
@@ -33,6 +34,7 @@ import {MainBroadcastChannelEvents, unversionedMainBroadcastChannelName} from '@
 import objectUrlRegistry from '@lib/mainWorker/objectUrlRegistry';
 import SharedObjectUrlCache, {getSharedObjectURLCacheStats, resetSharedObjectURLCaches} from '@lib/mainWorker/sharedObjectUrlCache';
 
+installGlobalNetworkProxy();
 
 const log = logger('MTPROTO');
 // let haveState = false;

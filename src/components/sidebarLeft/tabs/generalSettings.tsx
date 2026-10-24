@@ -98,6 +98,22 @@ const SettingsSection = () => {
           {i18n('LiteMode.EnableText')}
         </Row.Title>
       </Row>
+      <Row>
+        <Row.CheckboxFieldToggle>
+          <CheckboxFieldTsx stateKey={joinDeepPath('settings', 'proMode')} toggle />
+        </Row.CheckboxFieldToggle>
+        <Row.Title>Pro Mode</Row.Title>
+        <Row.Subtitle>Pro Mode</Row.Subtitle>
+      </Row>
+      <Row>
+        <Row.CheckboxFieldToggle>
+          <CheckboxFieldTsx stateKey={joinDeepPath('settings', 'forwarding', 'sendAsCopy')} toggle />
+        </Row.CheckboxFieldToggle>
+        <Row.Title>Forward as your own message</Row.Title>
+        <Row.Subtitle>
+          Resend forwarded content as a new message from you instead of using Telegram forwarding.
+        </Row.Subtitle>
+      </Row>
     </Section>
   );
 };
