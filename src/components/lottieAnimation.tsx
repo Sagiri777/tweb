@@ -1,21 +1,24 @@
 import {Component, createRenderEffect, mergeProps, onCleanup, onMount} from 'solid-js';
 
-import type {LottieAssetName, LottieLoader} from '@lib/rlottie/lottieLoader';
-import RLottiePlayer, {RLottieOptions} from '@lib/rlottie/rlottiePlayer';
+import type {LottieAssetName, LottieLoader, PreloadedLottieAsset} from '@lib/lottie/lottieLoader';
+import LottiePlayer, {LottieOptions} from '@lib/lottie/lottiePlayer';
 
 const LottieAnimation: Component<{
   lottieLoader: LottieLoader,
   class?: string,
-  name: LottieAssetName,
+  /** A built-in asset to fetch now. Mutually exclusive with `animationData`. */
+  name?: LottieAssetName,
+  /** An asset whose fetch started earlier (a tab's `getInitArgs`). */
+  animationData?: PreloadedLottieAsset,
   size?: number,
   needRaf?: boolean,
   restartOnClick?: boolean,
-  rlottieOptions?: Partial<RLottieOptions>,
-  onPromise?: (promise: Promise<RLottiePlayer>) => void
+  lottieOptions?: Partial<LottieOptions>,
+  onPromise?: (promise: Promise<LottiePlayer>) => void
 }> = (inProps) => {
   const props = mergeProps({size: 100}, inProps);
 
-  let animationPromise: Promise<RLottiePlayer>;
+  let animationPromise: Promise<LottiePlayer>;
 
   const div = (
     <div
@@ -41,18 +44,18 @@ const LottieAnimation: Component<{
       return
     }
 
-    animationPromise = props.lottieLoader.loadAnimationAsAsset(
-      {
-        container: div,
-        loop: false,
-        autoplay: true,
-        width: props.size,
-        height: props.size,
-        group: 'none',
-        ...props.rlottieOptions
-      },
-      props.name
-    );
+    const params: Omit<LottieOptions, 'animationData' | 'name'> = {
+      container: div,
+      loop: false,
+      autoplay: true,
+      width: props.size,
+      height: props.size,
+      group: 'none',
+      ...props.lottieOptions
+    };
+    animationPromise = props.animationData ?
+      props.animationData.then((load) => load(params)) :
+      props.lottieLoader.loadAnimationAsAsset(params, props.name);
     props.onPromise?.(animationPromise);
   }
 

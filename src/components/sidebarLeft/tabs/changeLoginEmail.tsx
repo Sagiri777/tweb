@@ -1,17 +1,9 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
-import {EnterCodeStep, EnterEmailStep} from '@components/popups/emailSetup';
-import {SliderSuperTab} from '@components/slider';
+import {EnterCodeStep, EnterEmailStep} from '@components/emailVerification';
+import SidebarSlider, {SliderSuperTab} from '@components/slider';
 import {render} from 'solid-js/web';
-
-import styles from '@components/sidebarLeft/tabs/changeLoginEmail.module.scss';
-import {AccountSentEmailCode} from '@layer';
+import {AccountPassword, AccountSentEmailCode} from '@layer';
 import {toastNew} from '@components/toast';
-import AppSettingsTab from '@components/sidebarLeft/tabs/settings';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 class ChangeLoginEmailCodeTab extends SliderSuperTab {
   private dispose: VoidFunction
@@ -20,24 +12,23 @@ class ChangeLoginEmailCodeTab extends SliderSuperTab {
     isInitialSetup?: boolean
     sentCode: AccountSentEmailCode.accountSentEmailCode
   }) {
-    this.container.classList.add(styles.container);
     this.setTitle('EmailSetup.ChangeEmail');
 
     this.dispose = render(() => (
       <EnterCodeStep
         purpose={{_: 'emailVerifyPurposeLoginChange'}}
-        footerClass={styles.footer}
+        variant="tab"
         sentCode={args.sentCode}
         onExpired={() => {
           this.close()
         }}
         onSuccess={() => {
           toastNew({langPackKey: args.isInitialSetup ? 'EmailSetup.SetupToast' : 'EmailSetup.ChangeToast'});
-          this.slider.sliceTabsUntilTab(AppSettingsTab, this);
+          this.slider.sliceTabsUntilTab(hotReloadGuard.tabs.AppSettingsTab, this);
           this.close()
         }}
       />
-    ), this.content)
+    ), this.scrollable.container)
   }
 
   onCloseAfterTimeout() {
@@ -47,16 +38,18 @@ class ChangeLoginEmailCodeTab extends SliderSuperTab {
 }
 
 export default class ChangeLoginEmailTab extends SliderSuperTab {
+  // `tg://settings/login_email` opened again must not stack a second form
+  public static noSame = true;
+
   private dispose: VoidFunction
 
-  public init(options: { isInitialSetup?: boolean }) {
-    this.container.classList.add(styles.container);
+  public init(options: {isInitialSetup?: boolean}) {
     this.setTitle('EmailSetup.ChangeEmail');
 
     this.dispose = render(() => (
       <EnterEmailStep
         purpose={{_: 'emailVerifyPurposeLoginChange'}}
-        footerClass={styles.footer}
+        variant="tab"
         isInitialSetup={options.isInitialSetup}
         onCodeSent={code => {
           this.slider.createTab(ChangeLoginEmailCodeTab).open({
@@ -65,11 +58,20 @@ export default class ChangeLoginEmailTab extends SliderSuperTab {
           });
         }}
       />
-    ), this.content)
+    ), this.scrollable.container)
   }
 
   onCloseAfterTimeout() {
     super.onCloseAfterTimeout();
     this.dispose();
   }
+}
+
+/** What the Login Email row and `tg://settings/login_email` open. */
+export function openChangeLoginEmailTab(slider: SidebarSlider, passwordState: AccountPassword) {
+  const pattern = passwordState.login_email_pattern;
+  return slider.createTab(ChangeLoginEmailTab).open({
+    // no email yet, or a placeholder for one: a pattern with a space in it ("REQUIRED *")
+    isInitialSetup: !pattern || pattern.includes(' ')
+  });
 }

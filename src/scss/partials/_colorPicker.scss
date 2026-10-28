@@ -1,16 +1,9 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 @use "../shared" as *;
 
 .color-picker {
   width: 380px;
   max-width: 100%;
-  margin: 1.1875rem auto .25rem;
-  user-select: none;
+  margin: 0 auto;
 
   @include respond-to(handhelds) {
     padding: 0 .75rem;
@@ -28,6 +21,13 @@
 
   &-dragger {
     cursor: grab;
+  }
+
+  // * the hue strip is a value slider: it runs from the inline start, so in RTL it is drawn mirrored
+  // * (`colorPicker.ts` reads the pointer the same way). The saturation box is a plane of colour,
+  // * like a colour wheel, and stays as it is
+  &-color-slider {
+    transform: scaleX(var(--reflect));
   }
 
   &-inputs {

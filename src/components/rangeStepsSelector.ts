@@ -1,12 +1,7 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import {Middleware} from '@helpers/middleware';
 import safeAssign from '@helpers/object/safeAssign';
 import RangeSelector from '@components/rangeSelector';
+import {LangPackKey} from '@lib/langPack';
 
 type RangeStep<T extends any = any> = [HTMLElement | string, T];
 export default class RangeStepsSelector<T extends any = any> {
@@ -23,6 +18,7 @@ export default class RangeStepsSelector<T extends any = any> {
 
   constructor(options: {
     middleware: RangeStepsSelector<T>['middleware'],
+    ariaLabel?: LangPackKey,
     generateStep: RangeStepsSelector<T>['generateStep'],
     generateSteps?: RangeStepsSelector<T>['generateSteps'],
     onValue?: RangeStepsSelector<T>['onValue'],
@@ -39,7 +35,7 @@ export default class RangeStepsSelector<T extends any = any> {
       this.range.removeListeners();
     });
 
-    const range = this.range = new RangeSelector({step: 1});
+    const range = this.range = new RangeSelector({step: 1, ariaLabel: options.ariaLabel});
     range.setListeners();
     range.setHandlers({
       onScrub: this.onIndex
@@ -55,12 +51,13 @@ export default class RangeStepsSelector<T extends any = any> {
     text.classList.add('range-setting-selector-option-text');
     text.replaceChildren(label);
     option.append(text);
-    option.style.left = `${idx / maxIndex * 100}%`;
+    // * from the inline start, as the track fills from there
+    option.style.insetInlineStart = `${idx / maxIndex * 100}%`;
 
     if(idx === 0 && !this.noFirstLast) option.classList.add('is-first');
     else if(idx === maxIndex) {
-      option.style.left = '';
-      option.style.right = '0';
+      option.style.insetInlineStart = '';
+      option.style.insetInlineEnd = '0';
       !this.noFirstLast && option.classList.add('is-last');
     }
 
@@ -88,6 +85,9 @@ export default class RangeStepsSelector<T extends any = any> {
   }
 
   protected onIndex = (index: number) => {
+    if(!this.steps[index]) return;
+    const label = this.steps[index][0];
+    this.range.setValueText(typeof(label) === 'string' ? label : label.textContent);
     this.onValue?.(this.steps[index][1]);
     this.optionsElements.forEach(({container}, idx) => {
       container.classList.toggle('active', index >= idx);

@@ -1,20 +1,21 @@
 import {createEffect, createMemo, createSignal, onCleanup} from 'solid-js';
 import PopupElement from '@components/popups/indexTsx';
-import PopupElementOld from '@components/popups/index'
 import {MyStarGift} from '@appManagers/appGiftsManager';
 import {StarGiftAttribute} from '@layer';
 import {randomItemExcept} from '@helpers/array/randomItem';
 import {i18n} from '@lib/langPack';
 import {IconTsx} from '@components/iconTsx';
 import {I18nTsx} from '@helpers/solid/i18n';
+import FeatureRows from '@components/featureRows';
 import {StarGiftBackdrop} from '@components/stargifts/stargiftBackdrop';
+import MediaHeader from '@components/mediaHeader';
 import {MyDocument} from '@appManagers/appDocsManager';
 import wrapSticker from '@components/wrappers/sticker';
-import RLottiePlayer from '@lib/rlottie/rlottiePlayer';
+import LottiePlayer from '@lib/lottie/lottiePlayer';
 import Row from '@components/rowTsx';
 import CheckboxFieldTsx from '@components/checkboxFieldTsx';
 import {ButtonIconTsx} from '@components/buttonIconTsx';
-import PopupPayment from '@components/popups/payment';
+import {createPaymentPopup} from '@components/popups/payment';
 import wrapPeerTitle from '@components/wrappers/peerTitle';
 import rootScope from '@lib/rootScope';
 import {createPopup} from '@components/popups/indexTsx';
@@ -24,14 +25,16 @@ import tsNow from '@helpers/tsNow';
 import {wrapLeftDuration} from '@components/wrappers/wrapDuration';
 import {AnimatedCounter} from '@components/animatedCounter';
 import {createStarGiftUpgradePricePopup} from '@components/popups/starGiftUpgradePrice';
-import PopupStarGiftInfo from '@components/popups/starGiftInfo';
+import showStarGiftInfoPopup from '@components/popups/starGiftInfo';
 import {subscribeOn} from '@helpers/solid/subscribeOn';
 import {createCurrentTime} from '@helpers/solid/createCurrentTime';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 export default async function createStarGiftUpgradePopup(props: {
   gift: MyStarGift,
   descriptionForPeerId?: PeerId
 }) {
+  const managers = bindManagersToSession(rootScope.managers);
   const [
     preview,
     peerTitle
@@ -60,13 +63,14 @@ export default async function createStarGiftUpgradePopup(props: {
   randomize();
 
   async function handleUpgrade(): Promise<boolean> {
+    const managers = bindManagersToSession(rootScope.managers);
     if(props.descriptionForPeerId && canPrepay) {
       const deferred = deferredPromise<boolean>();
-      PopupPayment.create({
+      createPaymentPopup({
         inputInvoice: {
           _: 'inputInvoiceStarGiftPrepaidUpgrade',
           hash: props.gift.saved?.prepaid_upgrade_hash,
-          peer: await rootScope.managers.appPeersManager.getInputPeerById(props.descriptionForPeerId)
+          peer: await managers.appPeersManager.getInputPeerById(props.descriptionForPeerId)
         },
         noShowIfStars: true
       }).then((popup) => {
@@ -80,14 +84,14 @@ export default async function createStarGiftUpgradePopup(props: {
     upgradePromise = deferredPromise<boolean>();
 
     if(freeUpgrade) {
-      await rootScope.managers.appGiftsManager.upgradeStarGift(
+      await managers.appGiftsManager.upgradeStarGift(
         props.gift.input,
         keepInfoSignal[0]()
       );
       return upgradePromise
     }
 
-    PopupPayment.create({
+    createPaymentPopup({
       inputInvoice: {
         _: 'inputInvoiceStarGiftUpgrade',
         stargift: props.gift.input,
@@ -154,7 +158,7 @@ export default async function createStarGiftUpgradePopup(props: {
         loop: false,
         middleware: middleware.get()
       }).then(({render}) => render).then((player_) => {
-        const player = player_ as RLottiePlayer;
+        const player = player_ as LottiePlayer;
         player.playOrRestart();
         player.addEventListener('enterFrame', (frameNo) => {
           if(frameNo === player.maxFrame) {
@@ -169,7 +173,7 @@ export default async function createStarGiftUpgradePopup(props: {
       if(!upgradePromise) return;
       if(!(event.savedId === props.gift.saved?.saved_id || event.fromMsgId === props.gift.saved?.msg_id)) return
 
-      PopupElementOld.createPopup(PopupStarGiftInfo, {
+      showStarGiftInfoPopup({
         gift: event.gift,
         upgradeAnimation: preview
       })
@@ -179,75 +183,62 @@ export default async function createStarGiftUpgradePopup(props: {
     let stickerContainer!: HTMLDivElement;
 
     return (
-      <PopupElement class="popup-star-gift-upgrade" show={show()}>
+      <PopupElement managers={managers} class="popup-star-gift-upgrade" show={show()} old>
+        <PopupElement.Header floating>
+          <PopupElement.CloseButton class="popup-star-gift-upgrade-close" />
+        </PopupElement.Header>
         <PopupElement.Body>
           <div class="popup-star-gift-upgrade-container">
-            <div class="popup-star-gift-upgrade-header">
-              <StarGiftBackdrop
-                class="popup-star-gift-upgrade-backdrop"
-                backdrop={backdrop()}
-                patternEmoji={pattern().document as MyDocument}
-              />
-              <ButtonIconTsx
-                class="popup-star-gift-upgrade-close"
-                icon="close"
-                onClick={() => setShow(false)}
-              />
-              <div
-                class="popup-star-gift-upgrade-sticker"
-                ref={stickerContainer}
-              />
-              <div class="popup-star-gift-upgrade-title">
+            <MediaHeader class="popup-star-gift-upgrade-header" onBackdrop>
+              <MediaHeader.Backdrop>
+                <StarGiftBackdrop
+                  backdrop={backdrop()}
+                  patternEmoji={pattern().document as MyDocument}
+                />
+              </MediaHeader.Backdrop>
+              <MediaHeader.Sticker size={120} ref={stickerContainer} />
+              <MediaHeader.Title>
                 {i18n(props.descriptionForPeerId ? 'StarGiftUpgradeTitleFor' : 'StarGiftUpgradeTitle')}
-              </div>
-              <div class="popup-star-gift-upgrade-subtitle">
+              </MediaHeader.Title>
+              <MediaHeader.Subtitle>
                 {i18n(props.descriptionForPeerId ? 'StarGiftUpgradeSubtitleFor' : 'StarGiftUpgradeSubtitle', [peerTitle])}
-              </div>
-            </div>
+              </MediaHeader.Subtitle>
+            </MediaHeader>
             <div class="popup-star-gift-upgrade-body">
-              <div class="popup-star-gift-upgrade-feature">
-                <IconTsx class="popup-star-gift-upgrade-feature-icon" icon="gem" />
-                <div class="popup-star-gift-upgrade-feature-body">
-                  <I18nTsx class="popup-star-gift-upgrade-feature-title" key="StarGiftUpgradeUniqueTitle" />
-                  <I18nTsx
-                    class="popup-star-gift-upgrade-feature-text"
+              <FeatureRows rows={[
+                {
+                  icon: 'gem',
+                  title: <I18nTsx key="StarGiftUpgradeUniqueTitle" />,
+                  subtitle: <I18nTsx
                     key={props.descriptionForPeerId ? 'StarGiftUpgradeUniqueTextPrepaid' : 'StarGiftUpgradeUniqueText'}
                     args={props.descriptionForPeerId ? [peerTitle.cloneNode(true)] : []}
                   />
-                </div>
-              </div>
-              <div class="popup-star-gift-upgrade-feature">
-                <IconTsx class="popup-star-gift-upgrade-feature-icon" icon="gem_exchange" />
-                <div class="popup-star-gift-upgrade-feature-body">
-                  <I18nTsx class="popup-star-gift-upgrade-feature-title" key="StarGiftUpgradeTransferableTitle" />
-                  <I18nTsx
-                    class="popup-star-gift-upgrade-feature-text"
+                },
+                {
+                  icon: 'gem_exchange',
+                  title: <I18nTsx key="StarGiftUpgradeTransferableTitle" />,
+                  subtitle: <I18nTsx
                     key={props.descriptionForPeerId ? 'StarGiftUpgradeTransferableTextPrepaid' : 'StarGiftUpgradeTransferableText'}
                     args={props.descriptionForPeerId ? [peerTitle.cloneNode(true)] : []}
                   />
-                </div>
-              </div>
-              <div class="popup-star-gift-upgrade-feature">
-                <IconTsx class="popup-star-gift-upgrade-feature-icon" icon="trade" />
-                <div class="popup-star-gift-upgrade-feature-body">
-                  <I18nTsx class="popup-star-gift-upgrade-feature-title" key="StarGiftUpgradeTradableTitle" />
-                  <I18nTsx
-                    class="popup-star-gift-upgrade-feature-text"
+                },
+                {
+                  icon: 'trade',
+                  title: <I18nTsx key="StarGiftUpgradeTradableTitle" />,
+                  subtitle: <I18nTsx
                     key={props.descriptionForPeerId ? 'StarGiftUpgradeTradableTextPrepaid' : 'StarGiftUpgradeTradableText'}
                     args={props.descriptionForPeerId ? [peerTitle.cloneNode(true)] : []}
                   />
-                </div>
-              </div>
+                }
+              ]} />
             </div>
             {!props.descriptionForPeerId && (
               <div class="popup-star-gift-upgrade-footer">
                 <Row>
                   <Row.CheckboxField>
-                    <CheckboxFieldTsx
-                      text="StarGiftUpgradeKeepInfo"
-                      signal={keepInfoSignal}
-                    />
+                    <CheckboxFieldTsx signal={keepInfoSignal} />
                   </Row.CheckboxField>
+                  <Row.Title>{i18n('StarGiftUpgradeKeepInfo')}</Row.Title>
                 </Row>
               </div>
             )}

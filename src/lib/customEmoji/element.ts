@@ -1,27 +1,24 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import type {CancellablePromise} from '@helpers/cancellablePromise';
 import animationIntersector from '@components/animationIntersector';
 import safePlay from '@helpers/dom/safePlay';
 import {MiddlewareHelper} from '@helpers/middleware';
 import {createCustomFiller} from '@lib/richTextProcessor/wrapRichText';
-import RLottiePlayer from '@lib/rlottie/rlottiePlayer';
+import LottiePlayer from '@lib/lottie/lottiePlayer';
 import {CustomEmojiRendererElement, SyncedPlayer} from '@lib/customEmoji/renderer';
+
+const TAG_NAME = 'custom-emoji-element';
 
 export type CustomEmojiElements = Set<CustomEmojiElement>;
 
 export default class CustomEmojiElement extends HTMLElement {
   public elements: CustomEmojiElements;
   public renderer: CustomEmojiRendererElement;
-  public player: RLottiePlayer | HTMLVideoElement;
+  public player: LottiePlayer | HTMLVideoElement;
   public paused: boolean;
   public syncedPlayer: SyncedPlayer;
   public clean: boolean;
   public lastChildWas: Node;
+  public savedChildren: Node[];
   // public docId: DocId;
   public placeholder: HTMLImageElement;
   public middlewareHelper: MiddlewareHelper;
@@ -43,7 +40,8 @@ export default class CustomEmojiElement extends HTMLElement {
   }
 
   public static create(docId?: DocId) {
-    const element = new CustomEmojiElement();
+    // the registered class: after a hot update this module's class is a copy, which the element registry does not know
+    const element = new (customElements.get(TAG_NAME) as typeof CustomEmojiElement)();
     if(docId) element.docId = docId;
     return element;
   }
@@ -104,10 +102,8 @@ export default class CustomEmojiElement extends HTMLElement {
 
     if(this.renderer) {
       const elements = this.renderer.customEmojis.get(this.docId);
-      if(elements?.delete(this) && !elements.size) {
-        this.renderer.customEmojis.delete(this.docId);
-        this.renderer.textColored.delete(elements);
-        this.renderer.playersSynced.delete(elements);
+      if(elements?.delete(this)) {
+        this.renderer.onElementCleared(this.docId, elements);
       }
 
       if(replaceChildren) {
@@ -190,4 +186,9 @@ export default class CustomEmojiElement extends HTMLElement {
   }
 }
 
-customElements.define('custom-emoji-element', CustomEmojiElement);
+if(!customElements.get(TAG_NAME)) {
+  customElements.define(TAG_NAME, CustomEmojiElement);
+}
+
+// a method edited here takes effect on the emoji on screen, without a reload (see @helpers/hotRegistry)
+if(import.meta.hot) import.meta.hot.accept();

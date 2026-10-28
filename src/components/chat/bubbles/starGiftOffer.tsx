@@ -4,7 +4,9 @@ import {Message, MessageAction, StarGift} from '@layer';
 
 
 import {MyStarGift} from '@appManagers/appGiftsManager';
-import {i18n} from '@lib/langPack';
+import I18n, {i18n} from '@lib/langPack';
+import buttonKeyDown from '@helpers/solid/buttonKeyDown';
+import Modes from '@config/modes';
 import tsNow from '@helpers/tsNow';
 import {wrapFormattedDuration} from '@components/wrappers/wrapDuration';
 import formatDuration, {DurationType} from '@helpers/formatDuration';
@@ -21,8 +23,8 @@ import confirmationPopup from '@components/confirmationPopup';
 import wrapPeerTitle from '@components/wrappers/peerTitle';
 import rootScope from '@lib/rootScope';
 import {transferStarGiftConfirmationPopup} from '@components/popups/transferStarGift';
-import PopupElement from '../../popups';
-import PopupStarGiftInfo from '../../popups/starGiftInfo';
+import showStarGiftInfoPopup from '../../popups/starGiftInfo';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 function wrapExpiresIn(duration: number) {
   const formatted = formatDuration(duration, 2);
@@ -48,9 +50,13 @@ export function StarGiftOfferBubble(props: {
   return (
     <div
       class={/* @once */ styles.wrap}
+      role="button"
+      tabindex={Modes.a11y ? 0 : undefined}
+      aria-label={I18n.format('ActionGiftPremiumView', true)}
       onClick={() => {
-        PopupElement.createPopup(PopupStarGiftInfo, {gift: props.gift})
+        showStarGiftInfoPopup({gift: props.gift})
       }}
+      onKeyDown={buttonKeyDown}
     >
       <div class={/* @once */ styles.giftWrap}>
         <StarGiftBackdrop
@@ -104,6 +110,7 @@ export function StarGiftOfferReplyMarkup(props: {
   chat: Chat
 }) {
   const onRejectClick = async() => {
+    const managers = bindManagersToSession(rootScope.managers);
     await confirmationPopup({
       titleLangKey: 'StarGiftOffer.RejectOfferTitle',
       descriptionLangKey: 'StarGiftOffer.RejectOfferText',
@@ -114,7 +121,7 @@ export function StarGiftOfferReplyMarkup(props: {
       }
     });
 
-    await rootScope.managers.appGiftsManager.resolveGiftOffer(props.message.id, 'reject');
+    await managers.appGiftsManager.resolveGiftOffer(props.message.id, 'reject');
   };
   const onAcceptClick = () => {
     transferStarGiftConfirmationPopup({

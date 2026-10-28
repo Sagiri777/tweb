@@ -1,12 +1,5 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import ctx from '@environment/ctx';
 import callbackify from '@helpers/callbackify';
-import {ignoreRestrictionReasons} from '@helpers/restrictions';
 import {Config, DataJSON, HelpAppConfig, HelpPeerColors, MethodDeclMap, User} from '@layer';
 import {InvokeApiOptions} from '@types';
 import {AppManager} from '@appManagers/manager';
@@ -188,7 +181,7 @@ export default abstract class ApiManagerMethods extends AppManager {
     const cacheKey = options.cacheKey || JSON.stringify(params);
     const map = cache[method] ??= new Map();
     const oldPromise = map.get(cacheKey);
-    if(oldPromise) {
+    if(oldPromise && !options.overwrite) {
       return oldPromise;
     }
 
@@ -332,7 +325,6 @@ export default abstract class ApiManagerMethods extends AppManager {
 
   private applyAppConfig(appConfig: MTAppConfig, save?: boolean) {
     this.appConfig = appConfig;
-    ignoreRestrictionReasons(appConfig.ignore_restriction_reasons ?? []);
 
     if(save) {
       appConfig.cachedTime = Date.now();

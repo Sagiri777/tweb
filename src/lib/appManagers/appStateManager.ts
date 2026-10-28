@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import type {State, StateSettings} from '@config/state';
 import rootScope from '@lib/rootScope';
 import StateStorage from '@lib/stateStorage';
@@ -98,7 +92,8 @@ export default class AppStateManager {
   }: {
     key: T,
     defaultValue: State[T]['value'],
-    getValue: () => Promise<State[T]['value']>,
+    // * resolves what to cache, or `undefined` when it has dealt with the cache itself
+    getValue: () => Promise<State[T]['value'] | undefined>,
     overwrite?: boolean
   }) {
     return callbackify(this.state ?? this.getState(), (state) => {
@@ -108,7 +103,9 @@ export default class AppStateManager {
       const shouldRefresh = !hasValue || cached.timestamp < (now - 86400e3);
       if(shouldRefresh || overwrite) {
         getValue().then((value) => {
-          this.pushToState(key, {value, timestamp: now});
+          if(value !== undefined) {
+            this.pushToState(key, {value, timestamp: now});
+          }
         });
       }
 

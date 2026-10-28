@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import {Accessor, createEffect, createMemo, createResource, createSignal, JSX} from 'solid-js';
 import Animated from '@helpers/solid/animations';
 import createMiddleware from '@helpers/solid/createMiddleware';
@@ -17,7 +11,10 @@ export default function SelectedEffect(props: {
 }) {
   const [element, setElement] = createSignal<JSX.Element>();
   const lastElement = createMemo<JSX.Element>((prev) => element() || prev);
-  const [availableEffects] = createResource(async() => {
+  // * asked for once, when an effect is chosen first: the list is ~200 KB, and asked for by every new composer it came
+  // * right when the first chat of a tab opened and held its history back by ~0.4 s
+  const effectChosen = createMemo((chosen) => chosen || !!props.effect(), false);
+  const [availableEffects] = createResource(effectChosen, async() => {
     return rootScope.managers.appReactionsManager.getAvailableEffects();
   });
 

@@ -1,18 +1,15 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import appMediaPlaybackController from '@components/appMediaPlaybackController';
 import {IS_APPLE_MOBILE, IS_MOBILE} from '@environment/userAgent';
 import IS_TOUCH_SUPPORTED from '@environment/touchSupport';
 import cancelEvent from '@helpers/dom/cancelEvent';
+import {getAppWindow, getOverlayRoot} from '@helpers/appWindow';
 import ListenerSetter, {Listener} from '@helpers/listenerSetter';
 import {ButtonMenuItemOptionsVerifiable} from '@components/buttonMenu';
 import ButtonMenuToggle from '@components/buttonMenuToggle';
 import ControlsHover from '@helpers/dom/controlsHover';
 import {addFullScreenListener, cancelFullScreen, getFullScreenElement, isFullScreen, requestFullScreen} from '@helpers/dom/fullScreen';
+import {isClientPipOpen} from '@components/clientPip';
+import {toastNew} from '@components/toast';
 import toHHMMSS from '@helpers/string/toHHMMSS';
 import MediaProgressLine from '@components/mediaProgressLine';
 import VolumeSelector from '@components/volumeSelector';
@@ -20,7 +17,7 @@ import debounce from '@helpers/schedulers/debounce';
 import overlayCounter from '@helpers/overlayCounter';
 import onMediaLoad from '@helpers/onMediaLoad';
 import {attachClickEvent} from '@helpers/dom/clickEvent';
-import safePlay from '@helpers/dom/safePlay';
+import playOrPlayMuted from '@helpers/dom/playOrPlayMuted';
 import ButtonIcon from '@components/buttonIcon';
 import Button from '@components/button';
 import Icon from '@components/icon';
@@ -30,8 +27,9 @@ import {numberThousandSplitterForWatching} from '@helpers/number/numberThousandS
 import createCanvasStream from '@helpers/canvas/createCanvasStream';
 import simulateEvent from '@helpers/dom/dispatchEvent';
 import indexOfAndSplice from '@helpers/array/indexOfAndSplice';
-import {VideoTimestamp} from '@components/appMediaViewerBase';
+import {VideoTimestamp} from '@components/mediaViewer/base';
 import apiManagerProxy from '@lib/apiManagerProxy';
+import keepLeftToRight from '@helpers/dom/keepLeftToRight';
 import {Accessor, createSignal, Setter} from 'solid-js';
 
 import {createQualityLevelsSwitchButton} from './qualityLevelsSwitchButton';
@@ -65,7 +63,10 @@ export default class VideoPlayer extends ControlsHover {
   /* protected videoParent: HTMLElement;
   protected videoWhichChild: number; */
 
-  protected onPlaybackRateMenuToggle?: (open: boolean) => void;
+  protected onMenuToggle?: (open: boolean) => void;
+  // Fired while the seek-bar time preview (.media-progress-line__current-time-info)
+  // is shown/hidden, so the host can hide chrome that would stack with it (caption).
+  protected onTimePreviewToggle?: (visible: boolean) => void;
   protected onPip?: (pip: boolean) => void;
   protected onPipClose?: () => void;
   protected onVolumeChange: VolumeSelector['onVolumeChange'];
@@ -108,7 +109,8 @@ export default class VideoPlayer extends ControlsHover {
     width,
     height,
     videoTimestamps,
-    onPlaybackRateMenuToggle,
+    onMenuToggle,
+    onTimePreviewToggle,
     onPip,
     onPipClose,
     listenKeyboardEvents,
@@ -128,7 +130,8 @@ export default class VideoPlayer extends ControlsHover {
     width?: number,
     height?: number,
     videoTimestamps?: VideoTimestamp[],
-    onPlaybackRateMenuToggle?: VideoPlayer['onPlaybackRateMenuToggle'],
+    onMenuToggle?: VideoPlayer['onMenuToggle'],
+    onTimePreviewToggle?: VideoPlayer['onTimePreviewToggle'],
     onPip?: VideoPlayer['onPip'],
     onPipClose?: VideoPlayer['onPipClose'],
     listenKeyboardEvents?: VideoPlayer['listenKeyboardEvents'],
@@ -151,7 +154,8 @@ export default class VideoPlayer extends ControlsHover {
     this._width = width;
     this._height = height;
 
-    this.onPlaybackRateMenuToggle = onPlaybackRateMenuToggle;
+    this.onMenuToggle = onMenuToggle;
+    this.onTimePreviewToggle = onTimePreviewToggle;
     this.onPip = onPip;
     this.onPipClose = onPipClose;
     this.onVolumeChange = onVolumeChange;
@@ -191,7 +195,7 @@ export default class VideoPlayer extends ControlsHover {
         if(this.speedDragHandler?.controls.isChangingSpeed()) return false;
         return true;
       },
-      showOnLeaveToClassName: 'media-viewer-caption',
+      showOnLeaveToClassName: ['media-viewer-caption', 'media-viewer-topbar', 'media-viewer-album-thumbs'],
       ignoreClickClassName: 'ckin__controls'
     });
 
@@ -228,13 +232,19 @@ export default class VideoPlayer extends ControlsHover {
         onSeekEnd: () => {
           this.wrapper.classList.remove('is-seeking');
         },
-        onHover: this.previewParams ? (value) => {
-          this.previewSetTime(value * this.video.duration);
-          this.previewSetVisible(true);
-        } : undefined,
-        onPointerOut: this.previewParams ? () => {
-          this.previewSetVisible(false);
-        } : undefined
+        onHover: (value) => {
+          if(this.previewParams) {
+            this.previewSetTime(value * this.video.duration);
+            this.previewSetVisible(true);
+          }
+          this.onTimePreviewToggle?.(true);
+        },
+        onPointerOut: () => {
+          if(this.previewParams) {
+            this.previewSetVisible(false);
+          }
+          this.onTimePreviewToggle?.(false);
+        }
       });
       this.progress.setMedia({
         media: video,
@@ -245,13 +255,7 @@ export default class VideoPlayer extends ControlsHover {
     }
 
     if(play/*  && video.paused */) {
-      video.play().catch((err: Error) => {
-        if(err.name === 'NotAllowedError') {
-          video.muted = true;
-          video.autoplay = true;
-          safePlay(video);
-        }
-      }).finally(() => { // due to autoplay, play will not call
+      playOrPlayMuted(video).finally(() => { // due to autoplay, play will not call
         this.setIsPlaying(!this.video.paused);
       });
     } else {
@@ -282,7 +286,7 @@ export default class VideoPlayer extends ControlsHover {
 
     this.wrapper.classList.toggle('is-playing', isPlaying);
     this.toggles.forEach((toggle) => {
-      toggle.replaceChildren(Icon(isPlaying ? 'pause' : 'play'));
+      toggle.replaceChildren(Icon(isPlaying ? 'pause_filled' : 'play_filled'));
     });
   }
 
@@ -294,12 +298,15 @@ export default class VideoPlayer extends ControlsHover {
 
     const html = this.buildControls();
     wrapper.insertAdjacentHTML('beforeend', html);
+    // * playback is never mirrored: the controls run left to right in an RTL layout too, the live
+    // * stream's included (its viewer count is text in the language's own direction, `dir="auto"`)
+    keepLeftToRight(wrapper.querySelector<HTMLElement>(`.${skin}__controls`));
     let timeDuration: HTMLElement;
 
     const onPlayCallbacks: (() => void)[] = [], onPauseCallbacks: (() => void)[] = [];
     if(skin === 'default') {
       if(this.canPause) {
-        const mainToggle = this.mainToggle = Button(`${skin}__button--big toggle`, {noRipple: true, icon: 'play'});
+        const mainToggle = this.mainToggle = Button(`${skin}__button--big toggle`, {noRipple: true, icon: 'play_filled'});
         wrapper.firstElementChild.after(mainToggle);
       }
 
@@ -314,7 +321,7 @@ export default class VideoPlayer extends ControlsHover {
 
       const rightControls = wrapper.querySelector('.right-controls') as HTMLElement;
       if(!live) {
-        this.playbackRateButton = createPlaybackRateButton({skin: this.skin, onMenuToggle: this.onPlaybackRateMenuToggle});
+        this.playbackRateButton = createPlaybackRateButton({skin: this.skin, onMenuToggle: this.onMenuToggle});
       }
       if(!IS_MOBILE && document.pictureInPictureEnabled) {
         this.pipButton = ButtonIcon(`pip ${skin}__button`, {noRipple: true});
@@ -334,6 +341,7 @@ export default class VideoPlayer extends ControlsHover {
       const volumeSelector = this.volumeSelector = new VolumeSelector({
         listenerSetter,
         vertical: false,
+        keepLTR: true,
         media: video,
         useGlobalVolume: this.useGlobalVolume,
         onVolumeChange: this.onVolumeChange
@@ -372,10 +380,10 @@ export default class VideoPlayer extends ControlsHover {
           }, {listenerSetter: this.listenerSetter});
         }
 
-        if(this.listenKeyboardEvents) listenerSetter.add(document)('keydown', (e: KeyboardEvent) => {
+        if(this.listenKeyboardEvents) listenerSetter.add(getAppWindow().document)('keydown', (e: KeyboardEvent) => {
           if(
             overlayCounter.overlaysActive > 1 ||
-            document.pictureInPictureElement === video ||
+            getAppWindow().document.pictureInPictureElement === video ||
             (this.listenKeyboardEvents === 'fullscreen' && !this.isFullScreen())
           ) { // forward popup is active, etc
             return;
@@ -503,7 +511,7 @@ export default class VideoPlayer extends ControlsHover {
   }
 
   private createQualityLevelsButton() {
-    this.qualityLevelsButton = createQualityLevelsSwitchButton({skin: this.skin, video: this.video});
+    this.qualityLevelsButton = createQualityLevelsSwitchButton({skin: this.skin, video: this.video, onMenuToggle: this.onMenuToggle});
 
     return this.qualityLevelsButton.element;
   }
@@ -571,7 +579,7 @@ export default class VideoPlayer extends ControlsHover {
       this.emptyPipVideo.playsInline = true;
       this.emptyPipVideo.style.position = 'absolute';
       this.emptyPipVideo.style.visibility = 'hidden';
-      document.body.prepend(this.emptyPipVideo);
+      getOverlayRoot().prepend(this.emptyPipVideo);
       this.emptyPipVideo.srcObject = createCanvasStream({width, height, image: this.emptyPipVideoSource});
       this.addPipListeners(this.emptyPipVideo);
     }
@@ -580,8 +588,8 @@ export default class VideoPlayer extends ControlsHover {
     this.emptyPipVideo.requestPictureInPicture();
 
     onMediaLoad(this.video).then(() => {
-      if(document.pictureInPictureElement === this.emptyPipVideo) {
-        document.exitPictureInPicture();
+      if(getAppWindow().document.pictureInPictureElement === this.emptyPipVideo) {
+        getAppWindow().document.exitPictureInPicture();
         this.video.requestPictureInPicture();
       }
     });
@@ -596,7 +604,7 @@ export default class VideoPlayer extends ControlsHover {
 
     if(skin === 'default') {
       const time = this.live ? `
-      <span class="left-controls-watching"></span>
+      <span class="left-controls-watching" dir="auto"></span>
       ` : `
       <time class="ckin__time-elapsed">0:00</time>
       <span> / </span>
@@ -645,6 +653,16 @@ export default class VideoPlayer extends ControlsHover {
         this.videoWhichChild = videoWhichChild;
         player.prepend(this.video);
       } */
+
+      // Fullscreen genuinely can't be entered while the client is popped into a Document PiP window:
+      // the Fullscreen API is disabled there by spec, AND Chrome won't carry the click's user-activation
+      // from the PiP window over to the tab — so there's no single gesture that can fullscreen the tab's
+      // video either. Rather than silently fail (or close PiP with nothing to show for it), tell the user
+      // to return to the tab first. Outside PiP this branch is a no-op.
+      if(isClientPipOpen()) {
+        toastNew({langPackKey: 'ClientPip.FullscreenHint'});
+        return;
+      }
 
       requestFullScreen(player);
       this.checkInteraction();
@@ -708,7 +726,8 @@ export default class VideoPlayer extends ControlsHover {
     this.playbackRateButton?.dispose();
     this.speedDragHandler?.dispose();
     this.preview?.dispose();
-    this.onPlaybackRateMenuToggle =
+    this.onMenuToggle =
+      this.onTimePreviewToggle =
       this.onPip =
       this.onVolumeChange =
       this.onFullScreen =

@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import contextMenuController from '@helpers/contextMenuController';
 import {attachContextMenuListener} from '@helpers/dom/attachContextMenuListener';
 import cancelEvent from '@helpers/dom/cancelEvent';
@@ -12,9 +6,26 @@ import {getMiddleware, Middleware, MiddlewareHelper} from '@helpers/middleware';
 import {Reaction} from '@layer';
 import rootScope from '@lib/rootScope';
 import {ButtonMenuItemOptionsVerifiable, ButtonMenuSync} from '@components/buttonMenu';
-import PopupPremium from '@components/popups/premium';
 import ChatContextMenu from '@components/chat/contextMenu';
 import {ChatReactionsMenu} from '@components/chat/reactionsMenu';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
+import type {ButtonMenuDirection} from '@components/buttonMenuToggle';
+import {getOverlayRoot} from '@helpers/appWindow';
+import {positionMenuTrigger} from '@helpers/positionMenu';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
+
+/**
+ * A send button's menu lives in the overlay root like every other menu, placed against the button:
+ * inside the composer or a popup it would be cut off by whatever clips them. Not being inside them, it
+ * does not go away with them either, so it closes when `middleware` (its owner's) is cleaned
+ */
+export function mountSendMenu(element: HTMLElement, trigger: HTMLElement, direction: ButtonMenuDirection, middleware: Middleware) {
+  getOverlayRoot().append(element);
+  positionMenuTrigger(trigger, element, direction, {bottom: 8});
+  middleware.onClean(() => {
+    if(element.classList.contains('active')) contextMenuController.close();
+  });
+}
 
 export default class SendMenu {
   private type: 'schedule' | 'reminder';
@@ -25,13 +36,15 @@ export default class SendMenu {
     onSilentClick: () => void,
     onScheduleClick: () => void,
     onSendWhenOnlineClick?: () => void,
-    onRef: (element: HTMLElement) => void,
     middleware: Middleware,
-    openSide: string,
+    openSide: ButtonMenuDirection,
     onContextElement: HTMLElement,
     onOpen?: () => boolean,
+    onToggle?: (open: boolean) => void,
     canSendWhenOnline?: () => boolean | Promise<boolean>,
     withEffects?: () => boolean,
+    // * no room past the menu's end: the effects bar keeps over the menu, with no bubble at the button
+    effectsWithinMenu?: () => boolean,
     effect?: () => DocId,
     onEffect?: (effect: DocId) => void
   }) {
@@ -64,7 +77,7 @@ export default class SendMenu {
       icon: 'online',
       text: 'Schedule.SendWhenOnline',
       onClick: this.options.onSendWhenOnlineClick,
-      verify: () => this.type === 'schedule' && this.options.canSendWhenOnline?.() && !this.isPaid
+      verify: async() => this.type === 'schedule' && (await this.options.canSendWhenOnline?.()) && !this.isPaid
     }, {
       icon: 'crossround',
       text: 'Effect.Remove',
@@ -76,10 +89,10 @@ export default class SendMenu {
 
   private createMenu() {
     this.middlewareHelper.clean();
-    const middleware = this.middlewareHelper.get();
+    const menuMiddleware = this.middlewareHelper.get();
 
     const listenerSetter = new ListenerSetter();
-    middleware.onClean(() => {
+    menuMiddleware.onClean(() => {
       listenerSetter.removeAll();
     });
 
@@ -87,11 +100,11 @@ export default class SendMenu {
     const buttons = this.createButtons();
     const element = ButtonMenuSync({buttons, listenerSetter});
     element.classList.add('menu-send', this.options.openSide);
-    this.options.onRef(element);
 
     attachContextMenuListener({
       element: this.options.onContextElement,
       callback: async(e) => {
+        const managers = bindManagersToSession(rootScope.managers);
         if(this.options.onOpen && !this.options.onOpen()) {
           return;
         }
@@ -109,7 +122,7 @@ export default class SendMenu {
         let reactionsMenu: ChatReactionsMenu;
         if(this.options.withEffects?.()) {
           reactionsMenu = new ChatReactionsMenu({
-            managers: rootScope.managers,
+            managers,
             type: reactionsMenuPosition,
             middleware,
             onFinish: async(reaction) => {
@@ -121,11 +134,11 @@ export default class SendMenu {
 
               const stickerDocId = (reaction as Reaction.reactionCustomEmoji).document_id;
               if(!rootScope.premium && !reactionsMenu.freeCustomEmoji.has(stickerDocId)) {
-                PopupPremium.show({feature: 'premium_stickers'});
+                hotReloadGuard.showPremiumPopup({feature: 'premium_stickers'});
                 return;
               }
 
-              const availableEffects = await rootScope.managers.appReactionsManager.getAvailableEffects();
+              const availableEffects = await managers.appReactionsManager.getAvailableEffects();
               const availableEffect = availableEffects.find((effect) => effect.effect_sticker_id === stickerDocId);
               this.options.onEffect(availableEffect.id);
             },
@@ -138,16 +151,28 @@ export default class SendMenu {
           // const menuPadding = ChatContextMenu.getReactionsMenuPadding(reactionsMenuPosition);
         }
 
+        // * the owner went away while the menu was being built
+        if(!menuMiddleware()) {
+          middlewareHelper.destroy();
+          return;
+        }
+
+        const trigger = this.options.onContextElement;
+        element.classList.toggle('effects-within-menu', !!this.options.effectsWithinMenu?.());
+        mountSendMenu(element, trigger, this.options.openSide, menuMiddleware);
         const reactionsCallbacks = reactionsMenu && ChatContextMenu.appendReactionsMenu({element: element, reactionsMenu, reactionsMenuPosition});
 
+        this.options.onToggle?.(true);
         contextMenuController.openBtnMenu(element, () => {
+          this.options.onToggle?.(false);
           reactionsCallbacks?.onClose();
           middlewareHelper.destroy();
-          this.createMenu();
+          // * not when it closes because its owner is being destroyed
+          if(menuMiddleware()) this.createMenu();
           setTimeout(() => {
             element.remove();
           }, 400);
-        });
+        }, trigger);
 
         reactionsCallbacks?.onAfterInit();
       },

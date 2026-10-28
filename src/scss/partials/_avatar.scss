@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 .avatar-like {
   --size: 54px;
   --multiplier: 1;
@@ -13,7 +7,6 @@
   line-height: var(--size) !important;
   text-align: center;
   font-size: calc(1.25rem / var(--multiplier));
-  user-select: none;
   text-transform: uppercase;
   font-weight: var(--font-weight-bold);
 }
@@ -151,7 +144,7 @@
 
   &.is-monoforum {
     border-bottom-left-radius: 0;
-    mask-image: url(assets/img/monoforum-avatar-mask.svg);
+    mask-image: url('/assets/img/monoforum-avatar-mask.svg');
     mask-size: 100% 100%;
   }
 
@@ -178,7 +171,8 @@
       background-color: var(--avatar-online-color);
       width: 14px;
       height: 14px;
-      left: 2.4375rem;
+      // * at the inline-end corner
+      inset-inline-start: 2.4375rem;
       top: 2.4375rem;
     }
   }
@@ -222,7 +216,7 @@
   &-star {
     position: absolute;
     top: 65%;
-    left: 65%;
+    inset-inline-start: 65%;
     width: calc(var(--size) * 0.4);
     height: calc(var(--size) * 0.4);
     overflow: unset;
@@ -232,7 +226,7 @@
 
   &-auto-delete-timer {
     position: absolute;
-    right: -4px;
+    inset-inline-end: -4px;
     bottom: -2px;
     z-index: 1;
 
@@ -329,6 +323,11 @@
   &-84 {
     --size: 84px;
     --multiplier: .642857;
+  }
+
+  &-80 {
+    --size: 80px;
+    --multiplier: .675;
   }
 
   &-75 {
@@ -465,4 +464,14 @@
     height: 100% !important;
     object-fit: cover;
   }
+}
+
+.avatar-video {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+  border-radius: inherit;
+  pointer-events: none;
 }

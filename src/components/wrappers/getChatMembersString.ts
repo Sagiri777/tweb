@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import callbackify from '@helpers/callbackify';
 import numberThousandSplitter from '@helpers/number/numberThousandSplitter';
 import {Chat, ChatFull} from '@layer';
@@ -11,6 +5,7 @@ import getParticipantsCount from '@appManagers/utils/chats/getParticipantsCount'
 import {i18n, LangPackKey} from '@lib/langPack';
 import apiManagerProxy from '@lib/apiManagerProxy';
 import rootScope from '@lib/rootScope';
+import type {ReadingManagers} from '@lib/managers';
 
 function _getChatMembersString(chat: Chat, chatFull: ChatFull) {
   let count: number;
@@ -29,7 +24,7 @@ function _getChatMembersString(chat: Chat, chatFull: ChatFull) {
 
 export default function getChatMembersString(
   chatId: ChatId,
-  managers = rootScope.managers,
+  managers: ReadingManagers = rootScope.managers,
   chat?: Chat,
   onlySync?: boolean,
   chatFull?: ChatFull

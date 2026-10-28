@@ -6,6 +6,10 @@ import {AppManagers} from '@lib/managers';
 import {EmoticonsDropdown} from '@components/emoticonsDropdown';
 import EmojiTab from '@components/emoticonsDropdown/tabs/emoji';
 import Icon, {getIconContent} from '@components/icon';
+import {getOverlayRoot} from '@helpers/appWindow';
+import {getManagersSession, isSessionLeaving} from '@lib/accounts/getCurrentAccount';
+
+const openPickers = new WeakMap<HTMLElement, EmoticonsDropdown>();
 
 export function openEmojiStatusPicker(options: {
   managers: AppManagers
@@ -13,6 +17,15 @@ export function openEmojiStatusPicker(options: {
   onChosen?: () => void
 }) {
   const {managers, anchorElement} = options
+  // * asked for by an account session that is over, or on its way out: it would open over the next account
+  if(isSessionLeaving(getManagersSession(managers))) return;
+
+  const openPicker = openPickers.get(anchorElement);
+  if(openPicker) {
+    openPicker.toggle(false);
+    return;
+  }
+
   const emojiTab = new EmojiTab({
     noRegularEmoji: true,
     managers: managers,
@@ -41,7 +54,7 @@ export function openEmojiStatusPicker(options: {
       ];
     },
     onClick: async(emoji) => {
-      emoticonsDropdown.hideAndDestroy();
+      emoticonsDropdown.toggle(false);
 
       const noStatus = getIconContent('star') === emoji.emoji;
       let emojiStatus: EmojiStatus;
@@ -65,7 +78,8 @@ export function openEmojiStatusPicker(options: {
 
   const emoticonsDropdown = new EmoticonsDropdown({
     tabsToRender: [emojiTab],
-    customParentElement: document.body,
+    customParentElement: getOverlayRoot,
+    suppressOutClick: true,
     getOpenPosition: () => {
       const rect = anchorElement.getBoundingClientRect();
       const cloned = cloneDOMRect(rect);
@@ -79,7 +93,10 @@ export function openEmojiStatusPicker(options: {
 
   emoticonsDropdown.setTextColor(textColor);
 
+  openPickers.set(anchorElement, emoticonsDropdown);
+
   emoticonsDropdown.addEventListener('closed', () => {
+    openPickers.delete(anchorElement);
     emoticonsDropdown.hideAndDestroy();
   });
 

@@ -1,157 +1,91 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 @use "../shared" as *;
 
-@mixin dialog-badge-transition-reset() {
-  transition: none;
-  transform: scale(0);
-  opacity: 1;
+// * where the selection's checkbox sits at the start of a row, and how far the row's contents move
+// * past it: the checkbox, then the same gap the peer picker leaves after its own. A row can move
+// * them further (`--select-lane-shift`), and the slide into the lane follows whatever it is.
+$select-checkbox-inset: .75rem;
+$select-lane-shift: var(--select-lane-shift, #{1.5rem + .625rem});
+
+// what the row's contents come from when the lane opens under them, and go back to when it closes
+@each $name, $direction in (
+  slide-from-checkbox-lane: -1,
+  slide-to-checkbox-lane: 1
+) {
+  @keyframes #{$name} {
+    from {
+      transform: translateX(calc(#{$select-lane-shift} * #{$direction} * var(--reflect)));
+    }
+  }
 }
 
-@mixin dialog-badge-transition-visible() {
-  transform: scale(1);
-}
-
-@mixin dialog-badge-transition-backwards() {
-  opacity: 0;
-}
-
-@mixin dialog-badge-transition-animating() {
-  transition: background-color var(--chatlist-badge-transition-in), transform var(--chatlist-badge-transition-in);
-}
-
-@mixin dialog-badge-transition-animating-backwards() {
-  transition: background-color var(--chatlist-badge-transition-out), transform var(--chatlist-badge-transition-out), opacity var(--chatlist-badge-transition-out);
-}
-
+// * a badge pops in and out with full animations, and fades with reduced ones. Hidden until it is
+// * made visible either way (SetTransition marks it a couple of frames after it is in place). The
+// * reduced fade-in is an animation rather than a state, so a row can still hide its badges
+// * meanwhile (selection mode)
 @mixin dialog-badge-transition($after: false) {
+  $pseudo: '';
+  @if $after {
+    $pseudo: ':after';
+  }
+
+  @include animation-level(1) {
+    &.backwards#{$pseudo} {
+      opacity: 0;
+    }
+  }
+
+  @include animation-level-only(1) {
+    &:not(.is-visible)#{$pseudo} {
+      opacity: 0;
+    }
+
+    // * the badge's own timings spring for the pop, which a fade has no use for
+    &.is-visible.forwards.animating#{$pseudo} {
+      animation: fade-in-opacity var(--transition-standard-in);
+    }
+
+    &.animating#{$pseudo} {
+      transition: background-color var(--transition-standard-in);
+    }
+
+    &.animating.backwards#{$pseudo} {
+      transition: background-color var(--transition-standard-out), opacity var(--transition-standard-out);
+    }
+  }
+
   @include animation-level(2) {
-    @if $after {
-      &:after {
-        @include dialog-badge-transition-reset();
-      }
+    &#{$pseudo} {
+      transition: none;
+      transform: scale(0);
+      opacity: 1;
+    }
 
-      &.is-visible:not(.backwards):after {
-        @include dialog-badge-transition-visible();
-      }
+    &.is-visible.forwards#{$pseudo} {
+      transform: scale(1);
+    }
 
-      &.backwards:after {
-        @include dialog-badge-transition-backwards();
-      }
+    &.animating#{$pseudo} {
+      transition: background-color var(--chatlist-badge-transition-in), transform var(--chatlist-badge-transition-in);
+    }
 
-      &.animating:after {
-        @include dialog-badge-transition-animating();
-      }
-
-      &.animating.backwards:after {
-        @include dialog-badge-transition-animating-backwards();
-      }
-    } @else {
-      @include dialog-badge-transition-reset();
-
-      &.is-visible:not(.backwards) {
-        @include dialog-badge-transition-visible();
-      }
-
-      &.backwards {
-        @include dialog-badge-transition-backwards();
-      }
-
-      &.animating {
-        @include dialog-badge-transition-animating();
-
-        &.backwards {
-          @include dialog-badge-transition-animating-backwards();
-        }
-      }
+    &.animating.backwards#{$pseudo} {
+      transition: background-color var(--chatlist-badge-transition-out), transform var(--chatlist-badge-transition-out), opacity var(--chatlist-badge-transition-out);
     }
   }
 }
 
 .chatlist-container {
   position: relative;
+}
 
-  .search-group-recent.search-group {
-    @include respond-to(handhelds) {
-      padding: 2px 0 0;
-    }
-  }
-
-  .search-group {
-    width: 100%;
-    padding: 1rem 0 .5rem;
-    margin-bottom: 17px;
-
-    @include respond-to(handhelds) {
-      margin-bottom: 0;
-    }
-
-    &.is-hidden {
-      opacity: 0;
-    }
-
-    &.is-visible {
-      opacity: 1;
-
-      &.animating {
-        transition: opacity var(--transition-standard-in);
-      }
-    }
-
-    &__name {
-      color: var(--secondary-text-color);
-      padding: 0 23px;
-      padding-bottom: 1rem;
-      font-weight: var(--font-weight-bold);
-      user-select: none;
-
-      @include respond-to(handhelds) {
-        padding: 5px 9px 0 16px;
-        font-size: 15px;
-      }
-    }
-
-    &-contacts {
-      border-bottom: 1px solid var(--border-color);
-
-      @include respond-to(handhelds) {
-        padding: 0px 0 2px;
-      }
-
-      // .search-group__name {
-      //   padding-bottom: 17px;
-
-      //   @include respond-to(handhelds) {
-      //     padding-bottom: 0;
-      //   }
-      // }
-    }
-
-    &-people.search-group-contacts {
-      padding: 5px 0 5px !important;
-    }
-
-    &:last-child {
-      border-bottom: none;
-    }
-  }
-
-  .search-super {
-    .search-group {
-      margin-bottom: 0px;
-      padding: 0 0 .5rem;
-
-      &__name {
-        padding-top: 1rem;
-        display: flex;
-        justify-content: space-between;
-      }
-    }
-  }
+// * the third line of a row with folder tags - see `attachDialogFolderTags`
+.dialog-folder-tags {
+  order: 1;
+  display: flex;
+  gap: .25rem; // FOLDER_TAG_GAP
+  height: 1rem;
+  margin-top: .25rem;
+  overflow: hidden;
 }
 
 ul.chatlist {
@@ -171,8 +105,6 @@ ul.chatlist {
   width: 100%;
   background-color: var(--surface-color);
 
-  user-select: none;
-  -webkit-user-select: none; /* disable selection/Copy of UIWebView */
   -webkit-touch-callout: none; /* disable the IOS popup when long-press on a link */
 
   &-chat {
@@ -191,10 +123,150 @@ ul.chatlist {
       --background: var(--light-filled-secondary-text-color);
     }
 
+    // * the main list's avatar is the larger one, and stands a little further off the checkbox
+    &.chatlist-chat-bigger {
+      --select-lane-shift: #{1.5rem + .625rem + .25rem};
+    }
+
+    // * a row with folder tags is a line taller (`DIALOG_WITH_FOLDER_TAGS_HEIGHT`), its tags under
+    // * the message. The avatar stays where it is in any other row, at the top, as on Desktop - and
+    // * with it everything that sits on its corners
+    &.has-folder-tags {
+      min-height: 5.125rem;
+
+      .dialog-avatar {
+        top: .5625rem;
+      }
+    }
+
+    &:not(.has-folder-tags) .dialog-folder-tags {
+      display: none;
+    }
+
+    // * a row being selected (`DialogsSelectionBase`) wears its checkbox at its start, in a lane it
+    // * opens for it, and it looks like the peer picker's too - so a selected row is marked by the
+    // * checkbox alone. Only this checkbox: the picker's rows are `chatlist-chat` as well, and style
+    // * their own (`_selector.scss`)
+    .dialog-select-checkbox {
+      position: absolute;
+      z-index: 2;
+      margin: 0;
+      inset-inline-start: $select-checkbox-inset;
+      top: 50%;
+      transform: translateY(-50%);
+      // the row under it is the click target; the checkbox only shows what the selection holds
+      pointer-events: none;
+
+      // the fill of a checked one covers the ring, as in the picker
+      .checkbox-box-border {
+        z-index: unset;
+      }
+    }
+
+    // * the lane opens at once, with no transition on the margins: laying the row out again on every
+    // * frame is what that would cost, and a row carries custom emoji - their renderer measures what
+    // * it draws, so the whole list crawls. The contents catch up with a transform instead (below),
+    // * which is composited and costs no layout. It also leaves the row's own `transition` alone -
+    // * that one belongs to the reorder, which slides the rows by transform.
+    &.has-select-checkbox:not(.is-leaving-selection) {
+      .dialog-title,
+      .dialog-subtitle,
+      .dialog-folder-tags {
+        margin-inline-start: $select-lane-shift;
+      }
+
+      // `.row-media` pins its margins, as the picker's own `.row-selection-media` has it too
+      .dialog-avatar {
+        margin-inline-start: $select-lane-shift !important;
+      }
+    }
+
+    // * The checkbox is put on the row when the mode starts and taken off when it ends, so its
+    // * appearance is an animation rather than a transition - there is no earlier state to move
+    // * from. It plays off the mark the LIST wears while the mode is turning on or off, so a row
+    // * that merely scrolls into view meanwhile comes up with the checkbox already there.
+    // * `DialogsSelectionBase` holds the app's own animations back while this runs.
+    .is-selection-animating & .dialog-select-checkbox {
+      @include animation-level(1) {
+        animation: fade-in-opacity var(--transition-standard-in) forwards;
+      }
+    }
+
+    // * the row keeps the checkbox until it has faded out (`DialogsSelectionBase` takes it off at
+    // * the end), so the mode leaves the way it came
+    .is-selection-animating &.is-leaving-selection .dialog-select-checkbox {
+      @include animation-level(1) {
+        animation: fade-in-backwards-opacity var(--transition-standard-in) forwards;
+      }
+    }
+
+    // * The contents catch up with the lane off the same mark: a row that merely scrolls into view
+    // * while the mode is already on has nothing to catch up with, its lane is simply there. Two
+    // * animations rather than one with the shift in a variable: a row leaving the mode before it is
+    // * done coming into it has to start over from where it is, and only a new name restarts one
+    .is-selection-animating &.has-select-checkbox {
+      --checkbox-lane-animation: slide-from-checkbox-lane;
+
+      &.is-leaving-selection {
+        --checkbox-lane-animation: slide-to-checkbox-lane;
+      }
+
+      @include animation-level(2) {
+        .dialog-avatar,
+        .dialog-title,
+        .dialog-subtitle,
+        .dialog-folder-tags {
+          animation: var(--checkbox-lane-animation) var(--transition-standard-in);
+        }
+      }
+    }
+
+    // * while the list can be reordered (see REORDERABLE_LIST_CLASS_NAME) its pinned rows say so:
+    // * the grip takes the place of the time and the badges, as it does on the Android cell that
+    // * can be dragged. `.row-sortable-icon` is the same grip every other sortable row wears.
+    // * The two are faded rather than taken out, so the title keeps the width it had.
+    .is-reorderable &.is-pinned {
+      .row-sortable-icon {
+        opacity: 1;
+      }
+
+      .dialog-title-details,
+      .dialog-subtitle-badge {
+        opacity: 0;
+      }
+    }
+
+    // * a press on the row selects it in that mode, and so would one on the bot's button - which
+    // * makes way: hidden rather than faded, so that it is neither a target nor a tab stop
+    &.has-select-checkbox .dialog-subtitle-badge-bot-app {
+      visibility: hidden;
+    }
+
+    // * this one is deliberately no narrower than the row: `.dialog-subtitle-badge` carries its own
+    // * transition while it animates (`dialog-badge-transition`), and that rule wins only while
+    // * this one weighs the same - qualifying this with `.is-pinned` would outweigh it and take
+    // * the badge's own appearance away
+    .row-sortable-icon,
+    .dialog-title-details,
+    .dialog-subtitle-badge {
+      @include animation-level(1) {
+        transition: opacity var(--transition-standard-in);
+      }
+    }
+
+    // * the pinned block is reordered by dragging one of its rows (attachPinnedDialogsReorder):
+    // * the dragged row is lifted above the rest, the ones making way for it slide
+    &.is-dragging {
+      --background: var(--surface-color);
+      z-index: 2;
+    }
+
+    @include sortable-item-transition();
+
     &.is-muted {
       body:not(.animation-level-0) & {
         &.animating {
-          &:not(.backwards) {
+          &.forwards {
             .dialog-muted-icon {
               animation: fade-in-opacity .2s ease-in-out forwards;
             }
@@ -205,16 +277,6 @@ ul.chatlist {
           }
         }
       }
-    }
-
-    // i {
-    //   font-style: normal;
-    // }
-
-    .text-highlight {
-      color: var(--primary-text-color);
-      font-weight: var(--font-weight-bold);
-      font-style: normal;
     }
 
     .premium-icon {
@@ -282,8 +344,14 @@ ul.chatlist {
       }
     }
 
+    // Everything that lives in the avatar's bottom-right corner has to give way
+    // to whatever the row paints over the avatar itself — the unread badge of a
+    // narrow list (collapsed sidebar / open forum tab) or the group call icon.
+    // Same rule as tdesktop's `Row::updateCornerBadgeShown`, which drops the
+    // corner badge to `kNoneLayer` once `hasUnreadBadgesAbove`.
     &:has(.avatar-badge), &.has-group-call-icon {
-      .avatar-auto-delete-timer {
+      .avatar-auto-delete-timer,
+      .dialog-avatar-corner-badge {
         transform: scale(0);
       }
     }
@@ -305,7 +373,6 @@ ul.chatlist {
         //.user-title:after,
         .user-title,
         .message-status,
-        .text-highlight,
         .premium-icon,
         .verified-icon,
         .sending-status-icon,
@@ -336,6 +403,12 @@ ul.chatlist {
           background-color: rgba(255, 255, 255, .2);
         }
 
+        // * a tag turns over as the badges do, white with the accent in it - Desktop's active tag
+        .folder-tag {
+          color: var(--primary-color);
+          background-color: #fff;
+        }
+
         .verified-icon {
           &-background {
             fill: #fff !important;
@@ -353,11 +426,22 @@ ul.chatlist {
           border-color: var(--primary-color);
         }
 
+        .dialog-group-call-icon-bar {
+          background-color: var(--primary-color);
+        }
+
         .badge.unread,
         .mention,
-        .dialog-subtitle-badge-reaction {
+        .dialog-subtitle-badge-reaction,
+        .dialog-subtitle-badge-pollvote,
+        .dialog-subtitle-badge-bot-app {
           background-color: #fff !important;
           color: var(--primary-color);
+        }
+
+        // * its focus ring goes around it, on the accent of the row
+        .dialog-subtitle-badge-bot-app {
+          outline-color: #fff;
         }
 
         // .badge.avatar-badge {
@@ -383,12 +467,14 @@ ul.chatlist {
 
   .sending-status-icon-premium_lock {
     font-size: .8125rem;
-    margin: .1875rem 0 0 .5rem;
+    margin-block: .1875rem 0;
+    margin-inline: .5rem 0;
     color: var(--secondary-color);
   }
 
   .dialog-avatar,
-  .row-row {
+  .row-row,
+  .dialog-folder-tags {
     pointer-events: none;
     position: relative; // for z-index
   }
@@ -457,12 +543,16 @@ ul.chatlist {
   }
 
   .unread,
-  .is-muted.backwards .unread {
+  .dialog-subtitle-badge-pollvote,
+  .is-muted.backwards .unread,
+  .is-muted.backwards .dialog-subtitle-badge-pollvote {
     background-color: var(--chatlist-status-color);
   }
 
   .is-muted .unread,
-  .no-unmuted-topic .unread {
+  .is-muted .dialog-subtitle-badge-pollvote,
+  .no-unmuted-topic .unread,
+  .no-unmuted-topic .dialog-subtitle-badge-pollvote {
     background-color: var(--secondary-color);
   }
 
@@ -509,14 +599,14 @@ ul.chatlist {
         transition: height var(--transition-standard-in);
       }
 
-      &.is-visible:not(.backwards) {
+      &.is-visible.forwards {
         height: 4rem;
       }
     }
 
     .row-icon {
       position: absolute;
-      right: .5rem;
+      inset-inline-end: .5rem;
       font-size: 1.5rem;
       color: var(--secondary-text-color);
     }
@@ -532,9 +622,12 @@ ul.chatlist {
     // flex: 1 1 auto;
     max-height: 36.375rem;
 
+    .sidebar-left-section-container {
+      padding-bottom: 0;
+    }
+
     .sidebar-left-section {
       padding-bottom: 0;
-      margin-bottom: 0 !important;
 
       /* &-name {
         padding-top: 1rem !important;
@@ -567,31 +660,33 @@ ul.chatlist {
   }
 
   &-subtitle {
-    &-flex {
-      display: flex;
-
+    // * the parts (chat name, sender, media thumb, message) are one inline line
+    // * elided once at its end by the row's own text-overflow — a flex row would
+    // * give every part its own ellipsis and truncate them all at once
+    &-parts {
       .has-only-pinned-badge:not(.animating) & {
         margin-inline-end: 1.5rem;
       }
     }
 
     &-span {
-      flex: 0 0 auto;
-      // flex: 0 1 auto;
-      max-width: 100%;
-
-      &-overflow {
-        text-overflow: ellipsis;
-        overflow: hidden;
-        white-space: pre;
-      }
+      // * isolates the part like `isolate`, but takes its direction from its own content: under
+      // * `.is-rtl [dir=auto] {direction: inherit}` an `isolate` part would turn "/start" into "start/"
+      unicode-bidi: plaintext;
+      // * the prefixes keep their trailing space, the message flattens its own
+      // * newlines into the single preview line
+      white-space: pre;
 
       &-last {
-        flex: unset;
-        max-width: none;
-        // flex: 1;
         white-space: nowrap;
       }
+    }
+
+    // * the arrow that points from a chat name into its message; `.inline-icon`
+    // * carries the alignment of an icon sitting inside a text line
+    &-arrow {
+      margin-inline: .125rem;
+      font-size: .875em;
     }
 
     &-badge {
@@ -606,24 +701,28 @@ ul.chatlist {
         --size: 1.625rem;
         margin: 0;
         position: absolute;
-        right: calc(100% - 4.0625rem);
+        // * on the avatar's bottom corner that faces the row's inline end
+        inset-inline-end: calc(100% - 4.0625rem);
         top: 2.4375rem;
         // border: 2px solid var(--surface-color);
         border: 2px solid var(--background, var(--surface-color));
         pointer-events: none;
         line-height: 23px !important;
 
-        @include animation-level(2) {
+        @include animation-level(1) {
            transition: opacity 0.2s;
          }
       }
 
-      &-reaction {
+      &-reaction, &-pollvote {
         padding: 0;
-        background-color: var(--danger-color) !important;
         display: flex !important;
         align-items: center;
         justify-content: center;
+      }
+
+      &-reaction {
+        background-color: var(--danger-color) !important;
         order: 1;
       }
 
@@ -644,6 +743,41 @@ ul.chatlist {
         order: 4;
         z-index: 0;
       }
+
+      &-pollvote {
+        order: 5;
+      }
+
+      // * opens a bot's main mini app (DialogElement.createBotAppButton): the accent pill of the
+      // * official apps (its fill is `.btn-color-primary`'s), in the place of the unread badge it
+      // * is never shown with
+      &-bot-app {
+        --padding: .5rem;
+        order: 3;
+        border: none;
+        font-family: inherit;
+        cursor: pointer;
+        // * the row's contents leave the pointer to the row (`.row-row`), this one takes it back
+        pointer-events: auto;
+
+        // * the global ring is drawn inside, in the very colour this pill is filled with
+        :root:where(.a11y) &:focus-visible {
+          outline-offset: 2px;
+        }
+
+        @include hover() {
+          background-color: var(--dark-primary-color);
+        }
+      }
+
+      // * leaving its place to another one, out of the flow where it stood
+      // * (DialogElement.holdBadgesInPlace) - after the rules above, whose margins it drops
+      &.is-held-in-place {
+        position: absolute;
+        top: var(--held-top);
+        inset-inline-end: var(--held-inline-end);
+        margin: 0;
+      }
     }
 
     &-media {
@@ -651,7 +785,6 @@ ul.chatlist {
       height: 1.25rem;
       line-height: 1.25rem;
       position: relative;
-      flex: 0 0 auto;
       border-radius: .25rem;
       margin-inline-end: 0.375rem;
       display: inline-block;
@@ -720,6 +853,30 @@ ul.chatlist {
     width: 20px;
     height: 20px;
     z-index: 2;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 2.5px;
+
+    // * three bars, the outer ones high while the middle one is low and back (groupCallActiveIcon.ts)
+    &-bar {
+      width: 2px;
+      height: 12px;
+      border-radius: 1px;
+      background-color: #fff;
+
+      &:nth-child(2) {
+        transform: scaleY(.3333);
+      }
+
+      @include animation-level(2) {
+        animation: group-call-bar 1s infinite;
+
+        &:nth-child(2) {
+          animation-delay: -.5s;
+        }
+      }
+    }
   }
 
   &-subtitle-badge,
@@ -732,10 +889,12 @@ ul.chatlist {
     @include dialog-badge-transition(true);
 
     .avatar-auto-delete-timer {
-      transition: transform var(--chatlist-badge-transition-in);
+      @include animation-level(2) {
+        transition: transform var(--chatlist-badge-transition-in);
+      }
     }
 
-    &.is-visible:not(.backwards) .avatar-auto-delete-timer  {
+    &.is-visible.forwards .avatar-auto-delete-timer  {
       transform: scale(0);
     }
   }
@@ -745,5 +904,22 @@ ul.chatlist {
     color: var(--chatlist-pinned-color);
     font-size: 1.125rem;
     margin-inline-start: .125rem;
+  }
+}
+
+// * |cos| of the time, as the canvas drew it: easing in to the low point, easing out of it
+@keyframes group-call-bar {
+  0% {
+    transform: scaleY(1);
+    animation-timing-function: cubic-bezier(.12, 0, .39, 0);
+  }
+
+  50% {
+    transform: scaleY(.3333);
+    animation-timing-function: cubic-bezier(.61, 1, .88, 1);
+  }
+
+  100% {
+    transform: scaleY(1);
   }
 }

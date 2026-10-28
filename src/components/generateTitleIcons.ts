@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import {attachClickEvent} from '@helpers/dom/clickEvent';
 import {Chat, User} from '@layer';
 import {i18n} from '@lib/langPack';
@@ -12,12 +6,10 @@ import rootScope from '@lib/rootScope';
 import generateFakeIcon from '@components/generateFakeIcon';
 import generatePremiumIcon from '@components/generatePremiumIcon';
 import generateVerifiedIcon from '@components/generateVerifiedIcon';
-import PopupElement from '@components/popups';
-import PopupPremium from '@components/popups/premium';
-import PopupStarGiftInfo from '@components/popups/starGiftInfo';
-import {openEmojiStatusPicker} from '@components/sidebarLeft/emojiStatusPicker';
 import {wrapAdaptiveCustomEmoji} from '@components/wrappers/customEmojiSimple';
 import wrapEmojiStatus from '@components/wrappers/emojiStatus';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 export default async function generateTitleIcons({
   peerId,
@@ -39,7 +31,7 @@ export default async function generateTitleIcons({
   noDirectMessagesBadge?: boolean,
   clickableEmojiStatus?: boolean,
   peer?: Chat | User
-}): Promise<{ elements: HTMLElement[]; botVerification?: HTMLElement; }> {
+}): Promise<{elements: HTMLElement[]; botVerification?: HTMLElement;}> {
   peer ??= apiManagerProxy.getPeer(peerId);
   const elements: HTMLElement[] = [];
   if(!peer) {
@@ -66,18 +58,18 @@ export default async function generateTitleIcons({
         const detach = attachClickEvent(container, async(e) => {
           e.stopPropagation();
           if(peerId === rootScope.myId) {
-            openEmojiStatusPicker({
-              managers: rootScope.managers,
+            hotReloadGuard.openEmojiStatusPicker({
+              managers: bindManagersToSession(rootScope.managers),
               anchorElement: container
             });
           } else if(emojiStatus._ === 'emojiStatusCollectible') {
             if(busy) return;
             busy = true;
             const gift = await rootScope.managers.appGiftsManager.getGiftBySlug(emojiStatus.slug);
-            PopupElement.createPopup(PopupStarGiftInfo, {gift});
+            hotReloadGuard.showStarGiftInfoPopup({gift});
             busy = false;
           } else {
-            PopupPremium.show({
+            hotReloadGuard.showPremiumPopup({
               peerId,
               emojiStatusId: emojiStatus.document_id
             });
@@ -96,7 +88,7 @@ export default async function generateTitleIcons({
         premiumIcon.classList.add('clickable');
         const detach = attachClickEvent(premiumIcon, (e) => {
           e.stopPropagation();
-          PopupPremium.show({
+          hotReloadGuard.showPremiumPopup({
             peerId
           });
         });

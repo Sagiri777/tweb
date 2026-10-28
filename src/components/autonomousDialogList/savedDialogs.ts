@@ -1,4 +1,3 @@
-import appDialogsManager from '@lib/appDialogsManager';
 import {SavedDialog} from '@appManagers/appMessagesManager';
 import {isSavedDialog} from '@appManagers/utils/dialogs/isDialog';
 import rootScope from '@lib/rootScope';
@@ -44,7 +43,7 @@ export class AutonomousSavedDialogList extends AutonomousDialogListBase<SavedDia
   }
 
   public getRectFromForPlaceholder() {
-    return appDialogsManager.chatsContainer;
+    return this.appDialogsManager.chatsContainer;
   }
 
   protected getFilterId() {
@@ -56,7 +55,9 @@ export class AutonomousSavedDialogList extends AutonomousDialogListBase<SavedDia
   }
 
   public getDialogKeyFromElement(element: HTMLElement) {
-    return +element.dataset.peerId;
+    // * a sublist is rendered as a row of our own peer with the saved peer as its thread, so the
+    // * key (the saved peer id, as `getDialogKey` gives it) is the thread - the peer id is ours
+    return +element.dataset.threadId;
   }
 
   public getDialogFromElement(element: HTMLElement) {

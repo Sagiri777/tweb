@@ -11,9 +11,10 @@ import ReplyMarkupLayout from '@components/chat/bubbleParts/replyMarkupLayout';
 import ripple from '@components/ripple';
 import wrapPeerTitle from '@components/wrappers/peerTitle';
 import type Chat from '@components/chat/chat';
-import SuggestedPostAcceptWithTimePopup from '@components/chat/bubbleParts/suggestedPostAcceptWithTimePopup';
+import showSuggestedPostAcceptWithTimePopup from '@components/chat/bubbleParts/suggestedPostAcceptWithTimePopup';
 import {useFormattedCommission} from '@components/chat/bubbleParts/suggestedPostAcceptWithTimePopup/useFormattedCommission';
-import SuggestedPostRejectPopup from '@components/chat/bubbleParts/suggestedPostRejectPopup';
+import showSuggestedPostRejectPopup from '@components/chat/bubbleParts/suggestedPostRejectPopup';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 ripple; // keep
 
 if(import.meta.hot) import.meta.hot.accept();
@@ -32,18 +33,19 @@ const SuggestedPostReplyMarkupContent = defineSolidElement({
     const {commission, formattedCommission} = useFormattedCommission();
 
     const onAcceptClick = async() => {
-      const canManageDirectMessages = await rootScope.managers.appPeersManager.canManageDirectMessages(props.message.peerId);
+      const managers = bindManagersToSession(rootScope.managers);
+      const canManageDirectMessages = await managers.appPeersManager.canManageDirectMessages(props.message.peerId);
       const stars = props.message.suggested_post?.price?._ === 'starsAmount' && +props.message.suggested_post?.price?.amount || undefined;
       let scheduleDate = props.message.suggested_post?.schedule_date || undefined;
       if(scheduleDate * 1000 < Date.now()) scheduleDate = undefined;
 
       if(canManageDirectMessages && !scheduleDate) {
-        new SuggestedPostAcceptWithTimePopup({
+        showSuggestedPostAcceptWithTimePopup({
           message: props.message,
           peerId: props.chat.peerId,
           HotReloadGuard,
           offeredStars: stars
-        }).show();
+        });
         return;
       }
 
@@ -65,7 +67,7 @@ const SuggestedPostReplyMarkupContent = defineSolidElement({
           button: {langKey: 'SuggestedPosts.Accept'}
         });
 
-        await rootScope.managers.monoforumDialogsStorage.toggleSuggestedPostApproval({
+        await managers.monoforumDialogsStorage.toggleSuggestedPostApproval({
           parentPeerId: props.message.peerId,
           messageId: props.message.mid
         });
@@ -73,10 +75,10 @@ const SuggestedPostReplyMarkupContent = defineSolidElement({
     };
 
     const onRejectClick = () => {
-      new SuggestedPostRejectPopup({
+      showSuggestedPostRejectPopup({
         peerId: props.message.peerId,
         messageId: props.message.mid
-      }).show();
+      });
     };
 
     const onSuggestChangesClick = () => {

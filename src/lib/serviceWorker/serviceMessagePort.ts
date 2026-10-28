@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import type {WebPushApiManager} from '@lib/webPushApiManager';
 import type {PushNotificationObject} from '@lib/serviceWorker/push';
 import type {MyUploadFile} from '@appManagers/apiFileManager';
@@ -14,6 +8,7 @@ import type {getEnvironment} from '@environment/utils';
 import type {VideoStreamInfo} from '@lib/calls/videoStreamInfo';
 import type {PushKey, PushSingleManager} from '@appManagers/pushSingleManager';
 import SuperMessagePort from '@lib/superMessagePort';
+import type {LogEntry} from '@lib/debug/logsBuffer';
 import {MOUNT_CLASS_TO} from '@config/debug';
 import {CacheStorageDbName} from '@lib/files/cacheStorage';
 
@@ -72,6 +67,8 @@ export default class ServiceMessagePort<Master extends boolean = false> extends 
   shownNotification: (payload: string) => void,
   leaveRtmpCall: (payload: [Long, boolean]) => void,
   toggleStreamInUse: (payload: {url: string, inUse: boolean, accountNumber: ActiveAccountNumber}) => void,
+  // * the account the tab shows - on every hello, and whenever it switches in place
+  tabAccount: (payload: ActiveAccountNumber, source: MessageEventSource) => void,
   toggleCacheStorage: (value: boolean) => void,
   resetEncryptableCacheStorages: () => void,
   toggleUsingPasscode: (payload: SWToggleUsingPasscodePayload, source: MessageEventSource) => void,
@@ -79,7 +76,12 @@ export default class ServiceMessagePort<Master extends boolean = false> extends 
   fillPushObject: (payload: PushNotificationObject) => PushNotificationObject,
   disableCacheStoragesByNames: (names: CacheStorageDbName[]) => void,
   enableCacheStoragesByNames: (names: CacheStorageDbName[]) => void,
-  resetOpenCacheStoragesByNames: (names: CacheStorageDbName[]) => void
+  resetOpenCacheStoragesByNames: (names: CacheStorageDbName[]) => void,
+  // Debug log buffer (see @lib/debug/logsBuffer): the main thread pulls the
+  // SW's ring buffer on export and propagates the enabled flag (the SW's
+  // location.search has no ?debug=1).
+  getLogs: (payload: void) => LogEntry[],
+  setLogBufferEnabled: (enabled: boolean) => void
 
   // from mtproto worker
   download: (payload: ServiceDownloadTaskPayload) => void,

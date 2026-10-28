@@ -12,42 +12,57 @@
   align-items: center;
   padding: 0 var(--padding-horizontal);
 
-  height: var(--height);
   border-radius: var(--border-radius);
 
   cursor: text;
+
+  &.fixedHeight {
+    height: var(--height);
+  }
+
+  &.minHeight {
+    min-height: var(--height);
+  }
+
+  &.solidBackground {
+    background-color: var(--surface-color);
+  }
 
   &.clickable {
     cursor: pointer;
   }
 
   &.withEndButtonIcon {
-    padding-right: calc(var(--padding-horizontal) - 0.5rem);
+    padding-inline-end: calc(var(--padding-horizontal) - 0.5rem);
   }
 
-  &:hover .BorderThin {
+  &.withStartButtonIcon {
+    padding-inline-start: calc(var(--padding-horizontal) - 0.5rem);
+  }
+
+  &.hoverEnabled:hover:not(.error) .BorderThin {
     border-color: var(--primary-color);
   }
 
-  &:focus-within .BorderThick {
+  &:focus-within .BorderThick, &.forceFocused .BorderThick {
     opacity: 1;
   }
 
-  &:focus-within .Label, .Label.active {
+  &:focus-within .Label, &.forceFocused .Label, .Label.active {
     --cover-padding: 0.25rem;
     font-size: 0.8rem;
     top: 0;
-    left: calc(var(--padding-horizontal) - var(--cover-padding));
+    inset-inline-start: calc(var(--padding-horizontal) - var(--cover-padding));
     padding: 0 var(--cover-padding);
     background-color: var(--surface-color);
   }
 
-  &:focus-within .Label {
+  &:focus-within .Label, &.forceFocused .Label {
     color: var(--primary-color);
     font-weight: bold;
   }
 
-  &:hover .Label {
+  &.hoverEnabled:hover:not(.error) .Label {
     color: var(--primary-color);
   }
 
@@ -73,7 +88,7 @@
   &Thin {
     border: 1px solid var(--input-search-border-color);
 
-    @include animation-level-global(2) {
+    @include animation-level-global(1) {
       transition: border-color .2s;
     }
   }
@@ -82,7 +97,7 @@
     border: 2px solid var(--primary-color);
     opacity: 0;
 
-    @include animation-level-global(2) {
+    @include animation-level-global(1) {
       transition: opacity .2s;
     }
   }
@@ -128,16 +143,16 @@
 
 .Label {
   position: absolute;
-  left: var(--offset, 0px);
+  // `--offset` is measured from the inline start (see `SimpleFormField.Label`)
+  inset-inline-start: var(--offset, 0px);
   top: 50%;
   transform: translateY(-50%);
   font-size: 1rem;
+  line-height: 1;
   color: $placeholder-color;
   pointer-events: none;
 
-  @include animation-level-global(2) {
-    transition: all .2s, font-weight .05s 0.1s;
-  }
+  @include animation-level-transition(font-size .2s, top .2s, left .2s, padding .2s, color .2s, background-color .2s, font-weight .05s .1s, $global: true);
 
   &.noTransition {
     transition: none !important;
@@ -149,9 +164,26 @@
   margin: 0 0.25rem;
 
   &.first {
-    margin-left: 0;
+    margin-inline-start: 0;
   }
   &.last {
-    margin-right: 0;
+    margin-inline-end: 0;
+  }
+
+  // Keep the icon closer to top when the text wraps multiple lines
+  &.withFixedIcon {
+    align-self: stretch;
+    padding-top: calc((var(--height) - 40px) / 2);
+  }
+
+  .lengthLeft {
+    padding-bottom: 0.375rem;
+  }
+
+  &.withLimit {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.25rem;
   }
 }

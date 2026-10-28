@@ -18,6 +18,11 @@ interface ImportMetaEnv {
   readonly VITE_SAFARI_PROXY_WEBSOCKET: string;
   readonly VITE_NETWORK_PROXY_ENABLED: string;
   readonly VITE_NETWORK_PROXY_URL: string;
+  // injected via `define` by vite.preview.config.ts; absent in every other build
+  readonly VITE_PREVIEW?: boolean;
+  // injected via `define` by vite.preview.config.ts when start-preview.sh is
+  // invoked with --no-worker; Modes.noWorker honours it without ?noWorker=1.
+  readonly VITE_NO_WORKER?: boolean;
 }
 
 interface ImportMeta {

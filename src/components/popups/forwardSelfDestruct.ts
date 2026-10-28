@@ -1,5 +1,4 @@
-import PopupElement from '@components/popups';
-import PopupPeer from '@components/popups/peer';
+import showPeerPopup from '@components/popups/peer';
 
 export default function showForwardSelfDestructPopup() {
   return new Promise<boolean | undefined>((resolve) => {
@@ -13,7 +12,7 @@ export default function showForwardSelfDestructPopup() {
       resolve(value);
     };
 
-    const popup = PopupElement.createPopup(PopupPeer, 'popup-confirmation', {
+    showPeerPopup('popup-confirmation', {
       title: 'How do you want to send self-destructing media?',
       description: 'These forwarded messages contain self-destructing media. You can keep the self-destruct timer, or resend them as regular messages.',
       buttons: [{
@@ -26,13 +25,10 @@ export default function showForwardSelfDestructPopup() {
         callback: () => {
           finish(false);
         }
-      }]
+      }],
+      onClose: () => {
+        finish(undefined);
+      }
     });
-
-    popup.addEventListener('close', () => {
-      finish(undefined);
-    });
-
-    popup.show();
   });
 }

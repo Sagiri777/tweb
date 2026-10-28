@@ -135,7 +135,7 @@ function patchXMLHttpRequest(scope: InstallableGlobalScope) {
   scope.XMLHttpRequest.prototype.open = function(
     method: string,
     url: string | URL,
-    async?: boolean,
+    async: boolean = true,
     username?: string | null,
     password?: string | null
   ) {

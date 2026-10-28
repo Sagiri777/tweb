@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import {FormatterArguments, LangPackKey} from '@lib/langPack';
 import {Document} from '@layer';
 import {ApiLimitType} from '@appManagers/apiManagerMethods';
@@ -24,7 +18,6 @@ export interface PremiumPromoFeature {
   _subtitleLangArgs?: (managers: AppManagers) => MaybePromise<FormatterArguments>;
   videoPosition?: 'bottom' | 'top';
   video?: Document.document;
-  wrappedVideo?: any;
   type?: string;
   content?: Array<{
     titleLangKey?: LangPackKey,
@@ -41,8 +34,7 @@ export interface PremiumPromoFeature {
     free?: number,
     premium?: number
   }>;
-  new?: boolean,
-  builded?: boolean
+  new?: boolean
 }
 
 export const PREMIUM_FEATURES_COLORS: string[] = [
@@ -80,7 +72,7 @@ const stories: PremiumPromoFeature = {
     titleLangKey: 'PremiumStoriesStealth',
     subtitleLangKey: 'PremiumStoriesStealthDescription',
     iconColor: '#7889FE',
-    icon: 'eyecross_outline'
+    icon: 'eyecross'
   }, {
     titleLangKey: 'PremiumStoriesViews',
     subtitleLangKey: 'PremiumStoriesViewsDescription',
@@ -90,7 +82,7 @@ const stories: PremiumPromoFeature = {
     titleLangKey: 'PremiumStoriesExpiration',
     subtitleLangKey: 'PremiumStoriesExpirationDescription',
     iconColor: '#C355AE',
-    icon: 'timer'
+    icon: 'timer_filled'
   }, {
     titleLangKey: 'PremiumStoriesSaveToGallery',
     subtitleLangKey: 'PremiumStoriesSaveToGalleryDescription',
@@ -113,7 +105,7 @@ const wrapGetLimitArgument = (limitType: ApiLimitType) => (managers: AppManagers
 
 const doubleLimits: PremiumPromoFeature = {
   feature: 'double_limits',
-  icon: 'premium_limits',
+  icon: 'premium_limits_filled',
   titleLangKey: 'Premium.Boarding.Double.Title',
   subtitleLangKey: 'Premium.Boarding.Double.Info',
   headerLangKey: 'Premium.Boarding.Double.Title',
@@ -187,19 +179,106 @@ const doubleLimits: PremiumPromoFeature = {
 
 const formatParts = (parts: number) => formatBytes(parts * 1.024 * 512 * 1024, 0);
 
+// the server lists it among the business features, yet it is also reached by name from the
+// premium promo (`showPremiumPopup`), so both sets carry it
+const folderTags: PremiumPromoFeature = {
+  feature: 'folder_tags',
+  icon: 'premium_tags_filled',
+  titleLangKey: 'PremiumPreviewFolderTags',
+  subtitleLangKey: 'PremiumPreviewFolderTagsDescription',
+  videoPosition: 'top'
+};
+
+/**
+ * Telegram Business — the promo shown from Settings, ordered by the app config's
+ * `business_promo_order` (see {@link BUSINESS_FEATURES_FALLBACK_ORDER}).
+ */
+export const BUSINESS_FEATURES: {[type in PremiumPromoFeatureType]?: PremiumPromoFeature} = {
+  greeting_message: {
+    feature: 'greeting_message',
+    icon: 'message_add',
+    titleLangKey: 'PremiumBusinessGreetingMessages',
+    subtitleLangKey: 'PremiumBusinessGreetingMessagesDescription',
+    videoPosition: 'top'
+  },
+  away_message: {
+    feature: 'away_message',
+    icon: 'message_away',
+    titleLangKey: 'PremiumBusinessAwayMessages',
+    subtitleLangKey: 'PremiumBusinessAwayMessagesDescription',
+    videoPosition: 'top'
+  },
+  quick_replies: {
+    feature: 'quick_replies',
+    icon: 'message_filled',
+    titleLangKey: 'PremiumBusinessQuickReplies',
+    subtitleLangKey: 'PremiumBusinessQuickRepliesDescription',
+    videoPosition: 'top'
+  },
+  business_hours: {
+    feature: 'business_hours',
+    icon: 'time_filled',
+    titleLangKey: 'PremiumBusinessOpeningHours',
+    subtitleLangKey: 'PremiumBusinessOpeningHoursDescription',
+    videoPosition: 'top'
+  },
+  business_location: {
+    feature: 'business_location',
+    icon: 'location_filled',
+    titleLangKey: 'PremiumBusinessLocation',
+    subtitleLangKey: 'PremiumBusinessLocationDescription',
+    videoPosition: 'top'
+  },
+  business_links: {
+    feature: 'business_links',
+    icon: 'link_filled',
+    titleLangKey: 'PremiumBusinessChatLinks',
+    subtitleLangKey: 'PremiumBusinessChatLinksDescription',
+    videoPosition: 'top'
+  },
+  business_intro: {
+    feature: 'business_intro',
+    icon: 'message_quote',
+    titleLangKey: 'PremiumBusinessIntro',
+    subtitleLangKey: 'PremiumBusinessIntroDescription',
+    videoPosition: 'top'
+  },
+  business_bots: {
+    feature: 'business_bots',
+    icon: 'bot_filled',
+    titleLangKey: 'PremiumBusinessChatbots',
+    subtitleLangKey: 'PremiumBusinessChatbotsDescription',
+    videoPosition: 'top'
+  },
+  folder_tags: folderTags
+};
+
+/** What the other clients fall back to when the app config carries no order. */
+export const BUSINESS_FEATURES_FALLBACK_ORDER: PremiumPromoFeatureType[] = [
+  'greeting_message',
+  'away_message',
+  'quick_replies',
+  'business_hours',
+  'business_location',
+  'business_links',
+  'business_intro',
+  'business_bots',
+  'folder_tags'
+];
+
 export const PREMIUM_FEATURES: {[type in PremiumPromoFeatureType]?: PremiumPromoFeature} = {
   stories: stories,
   double_limits: doubleLimits,
   voice_to_text: {
     feature: 'voice_to_text',
-    icon: 'premium_transcription',
+    icon: 'premium_transcription_filled',
     titleLangKey: 'Premium.Boarding.Voice.Title',
     subtitleLangKey: 'Premium.Boarding.Voice.Info',
     videoPosition: 'top'
   },
   faster_download: {
     feature: 'faster_download',
-    icon: 'premium_speed',
+    icon: 'premium_speed_filled',
     titleLangKey: 'Premium.Boarding.Download.Title',
     subtitleLangKey: 'Premium.Boarding.Download.Info',
     videoPosition: 'top'
@@ -213,13 +292,13 @@ export const PREMIUM_FEATURES: {[type in PremiumPromoFeatureType]?: PremiumPromo
   },
   animated_emoji: {
     feature: 'animated_emoji',
-    icon: 'premium_emoji',
+    icon: 'premium_emoji_filled',
     titleLangKey: 'Premium.Boarding.Emoji.Title',
     subtitleLangKey: 'Premium.Boarding.Emoji.Info'
   },
   more_upload: {
     feature: 'more_upload',
-    icon: 'premium_filesize',
+    icon: 'premium_filesize_filled',
     titleLangKey: 'Premium.Boarding.FileSize.Title',
     _titleLangArgs: (managers) => managers.apiManager.getLimit('uploadFileParts', true).then((parts) => [formatParts(parts)]),
     subtitleLangKey: 'Premium.Boarding.FileSize.Info',
@@ -232,21 +311,21 @@ export const PREMIUM_FEATURES: {[type in PremiumPromoFeatureType]?: PremiumPromo
   },
   emoji_status: {
     feature: 'emoji_status',
-    icon: 'premium_status',
+    icon: 'premium_status_filled',
     titleLangKey: 'Premium.Boarding.Status.Title',
     subtitleLangKey: 'Premium.Boarding.Status.Info',
     videoPosition: 'top'
   },
   peer_colors: {
     feature: 'peer_colors',
-    icon: 'premium_colors',
+    icon: 'premium_colors_filled',
     titleLangKey: 'Premium.Promo.Colors.Title',
     subtitleLangKey: 'Premium.Promo.Colors.Subtitle',
     videoPosition: 'top'
   },
   wallpapers: {
     feature: 'wallpapers',
-    icon: 'premium_wallpaper',
+    icon: 'premium_wallpaper_filled',
     titleLangKey: 'Premium.Promo.Wallpaper.Title',
     subtitleLangKey: 'Premium.Promo.Wallpaper.Subtitle',
     videoPosition: 'top',
@@ -261,14 +340,14 @@ export const PREMIUM_FEATURES: {[type in PremiumPromoFeatureType]?: PremiumPromo
   },
   advanced_chat_management: {
     feature: 'advanced_chat_management',
-    icon: 'premium_management',
+    icon: 'premium_management_filled',
     titleLangKey: 'Premium.Boarding.Chats.Title',
     subtitleLangKey: 'Premium.Boarding.Chats.Info',
     videoPosition: 'top'
   },
   no_ads: {
     feature: 'no_ads',
-    icon: 'premium_noads',
+    icon: 'premium_noads_filled',
     titleLangKey: 'Premium.Boarding.NoAds.Title',
     subtitleLangKey: 'Premium.Boarding.NoAds.Info'
     // actionTitleLangKey: 'Premium.Boarding.NoAds.Action',
@@ -276,7 +355,7 @@ export const PREMIUM_FEATURES: {[type in PremiumPromoFeatureType]?: PremiumPromo
   },
   infinite_reactions: {
     feature: 'infinite_reactions',
-    icon: 'premium_reactions',
+    icon: 'premium_reactions_filled',
     titleLangKey: 'Premium.Boarding.ReactionsNew.Title',
     subtitleLangKey: 'Premium.Boarding.ReactionsNew.Info',
     videoPosition: 'top'
@@ -284,14 +363,14 @@ export const PREMIUM_FEATURES: {[type in PremiumPromoFeatureType]?: PremiumPromo
   },
   animated_userpics: {
     feature: 'animated_userpics',
-    icon: 'premium_avatars',
+    icon: 'premium_avatars_filled',
     titleLangKey: 'Premium.Boarding.Avatar.Title',
     subtitleLangKey: 'Premium.Boarding.Avatar.Info',
     videoPosition: 'top'
   },
   premium_stickers: {
     feature: 'premium_stickers',
-    icon: 'premium_stickers',
+    icon: 'premium_stickers_filled',
     titleLangKey: 'Premium.Boarding.Stickers.Title',
     subtitleLangKey: 'Premium.Boarding.Stickers.Info',
     // actionIcon: 'premium_unlock',
@@ -299,24 +378,25 @@ export const PREMIUM_FEATURES: {[type in PremiumPromoFeatureType]?: PremiumPromo
   },
   last_seen: {
     feature: 'last_seen',
-    icon: 'premium_lastseen',
+    icon: 'premium_lastseen_filled',
     titleLangKey: 'PremiumPreviewLastSeen',
     subtitleLangKey: 'PremiumPreviewLastSeenDescription',
     new: true
   },
   message_privacy: {
     feature: 'message_privacy',
-    icon: 'premium_privacy',
+    icon: 'premium_privacy_filled',
     titleLangKey: 'PremiumPreviewMessagePrivacy',
     subtitleLangKey: 'PremiumPreviewMessagePrivacyDescription',
     new: true
   },
   saved_tags: {
     feature: 'saved_tags',
-    icon: 'premium_tags',
+    icon: 'premium_tags_filled',
     titleLangKey: 'PremiumPreviewTags',
     subtitleLangKey: 'PremiumPreviewTagsDescription2'
   },
+  folder_tags: folderTags,
   pm_noforwards: {
     feature: 'pm_noforwards',
     icon: 'sharingoff_filled',

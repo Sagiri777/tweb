@@ -1,18 +1,13 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import type LazyLoadQueue from '@components/lazyLoadQueue';
-import {formatFullSentTimeRaw, formatTime} from '@helpers/date';
+import isAnchoredEphemeralMessage from '@appManagers/utils/messages/isAnchoredEphemeralMessage';
+import {formatDate, formatFullSentTimeRaw, formatTime} from '@helpers/date';
 import {getFullDate} from '@helpers/date/getFullDate';
 import setInnerHTML from '@helpers/dom/setInnerHTML';
 import {Middleware} from '@helpers/middleware';
 import formatNumber from '@helpers/number/formatNumber';
 import {AvailableEffect, Message, MessageReplyHeader} from '@layer';
 import getPeerId from '@appManagers/utils/peers/getPeerId';
-import {i18n, _i18n, LangPackKey} from '@lib/langPack';
+import I18n, {i18n, _i18n, LangPackKey} from '@lib/langPack';
 import apiManagerProxy from '@lib/apiManagerProxy';
 import wrapEmojiText from '@lib/richTextProcessor/wrapEmojiText';
 import rootScope from '@lib/rootScope';
@@ -32,9 +27,11 @@ import wrapStickerAnimation from '@components/wrappers/stickerAnimation';
 import Scrollable from '@components/scrollable';
 import appDownloadManager from '@lib/appDownloadManager';
 import indexOfAndSplice from '@helpers/array/indexOfAndSplice';
-import {numberThousandSplitterForStars} from '@helpers/number/numberThousandSplitter';
+import numberThousandSplitter, {numberThousandSplitterForStars} from '@helpers/number/numberThousandSplitter';
 import {makeTime} from '@components/chat/utils';
+import {useAppConfig} from '@stores/appState';
 import {formatNanoton} from '@helpers/paymentsWrapCurrencyAmount';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 const NBSP = '&nbsp;';
 
@@ -64,12 +61,40 @@ const makeEdited = () => {
   return edited;
 };
 
+// layer 229: an ordinary message an ephemeral one is standing in for says "updated" where an
+// edited one would say "edited" (tdesktop's `Data::Flag::Updated`).
+const makeUpdated = () => {
+  const updated = document.createElement('i');
+  updated.classList.add('time-edited', 'time-part');
+  _i18n(updated, 'Ephemeral.Updated');
+  return updated;
+};
+
+// * when the `message_primary_edited_date` app config flag is on, the edited badge is
+// * replaced by the actual edit time ("edited at HH:MM" / "edited on <date> at HH:MM")
+// * shown in place of the sent time — matches tdesktop's EditedPrimary behaviour.
+const isSameDay = (a: Date, b: Date) => {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+};
+
+const makeEditedTime = (sentDate: Date, editDate: Date) => {
+  const timeEl = formatTime(editDate);
+  const now = new Date();
+  if(isSameDay(sentDate, now) && isSameDay(editDate, now)) {
+    return i18n('EditedMessage.At', [timeEl]);
+  }
+
+  const dateEl = formatDate(editDate, {shortMonth: true});
+  return i18n('EditedMessage.On', [dateEl, timeEl]);
+};
+
 const makeEffect = (props: {
   onlyElement?: boolean,
   docId?: DocId,
   middleware?: Middleware,
   loadPromises?: Promise<any>[]
 }) => {
+  const managers = bindManagersToSession(rootScope.managers);
   const span = document.createElement('span');
   span.classList.add('time-effect');
   if(props.onlyElement) {
@@ -80,7 +105,7 @@ const makeEffect = (props: {
 
   span.dataset.effectId = '' + props.docId;
 
-  rootScope.managers.acknowledged.appReactionsManager.getAvailableEffect(props.docId)
+  managers.acknowledged.appReactionsManager.getAvailableEffect(props.docId)
   .then(async(result) => {
     if(!result.cached) {
       deferred.resolve();
@@ -94,7 +119,7 @@ const makeEffect = (props: {
 
     const loadPromises: Promise<any>[] = [];
     wrapSticker({
-      doc: await rootScope.managers.appDocsManager.getDoc(availableEffect.static_icon_id),
+      doc: await managers.appDocsManager.getDoc(availableEffect.static_icon_id),
       div: span,
       middleware: props.middleware,
       loadPromises,
@@ -146,10 +171,12 @@ export const fireMessageEffect = ({e, isOut, element, middleware, scrollable, ef
     const {doc, thumb: fullThumb} = await getDocForEffect(availableEffect);
     if(!middleware()) return;
 
+    // * the effect flies from the message's side of the chat toward the middle; RTL swaps the sides
+    const isOnRight = !!isOut !== I18n.getIsRTL();
     const {animationDiv} = wrapStickerAnimation({
       doc,
       middleware,
-      side: isOut ? 'right' : 'left',
+      side: isOnRight ? 'right' : 'left',
       size: 240,
       target: element,
       play: true,
@@ -161,7 +188,7 @@ export const fireMessageEffect = ({e, isOut, element, middleware, scrollable, ef
       }
     });
 
-    if(isOut === false) {
+    if(isOut !== undefined && !isOnRight) {
       animationDiv.classList.add('reflect-x');
     }
   });
@@ -225,8 +252,27 @@ export namespace MessageRender {
     // let hasReactions: boolean;
 
     const fwdFrom = isMessage && message.fwd_from;
-    const time: HTMLElement = /* isSponsored ? undefined :  */makeTime(date, includeDate);
+
+    // * when enabled by app config, an edited message shows its actual edit time in place of the
+    // * sent time (and drops the separate "edited" badge) — but not when the footer is already
+    // * showing a forwarded/saved date (matches tdesktop's EditedPrimary && !ForwardedDate).
+    const editDate = isMessage && (message as Message.message).edit_date;
+    const editedPrimary = isMessage &&
+      !!useAppConfig().message_primary_edited_date &&
+      !!editDate &&
+      chatType !== ChatType.Scheduled &&
+      !(message as Message.message).pFlags.edit_hide &&
+      !(includeDate && !!fwdFrom);
+
+    const time: HTMLElement = /* isSponsored ? undefined :  */editedPrimary ?
+      makeEditedTime(date, new Date(editDate * 1000)) :
+      makeTime(date, includeDate);
+
+    let title = /* isSponsored ? undefined :  */getFullDate(new Date(message.date * 1000));
     if(isMessage) {
+      title += (message.edit_date && !message.pFlags.edit_hide ? `\nEdited: ${getFullDate(new Date(message.edit_date * 1000))}` : '') +
+        (fwdFrom ? `\nOriginal: ${getFullDate(new Date(fwdFrom.saved_date || fwdFrom.date * 1000))}` : '');
+
       const messageMedia = message.media;
       if(messageMedia?._ === 'messageMediaDice' && messageMedia.game_outcome) {
         const span = document.createElement('span');
@@ -243,7 +289,12 @@ export namespace MessageRender {
         postViewsSpan.classList.add('post-views');
         postViewsSpan.textContent = formatNumber(message.views, 1);
 
-        const channelViews = Icon('channelviews', 'time-icon', 'time-part', 'time-icon-views');
+        const channelViews = Icon('channelviews_filled', 'time-icon', 'time-part', 'time-icon-views');
+
+        title += '\n' + I18n.format('ViewsTooltip', true, [numberThousandSplitter(message.views)]);
+        if(message.forwards) {
+          title += '\n' + I18n.format('SharesTooltip', true, [numberThousandSplitter(message.forwards)]);
+        }
 
         args.push(postViewsSpan, channelViews);
       }
@@ -257,12 +308,25 @@ export namespace MessageRender {
         args.push(span);
       }
 
-      if(message.edit_date && chatType !== ChatType.Scheduled && !message.pFlags.edit_hide) {
+      if(message.via_business_bot_id) {
+        const bot = apiManagerProxy.getUser(message.via_business_bot_id as UserId);
+        const botName = [bot?.first_name, bot?.last_name].filter(Boolean).join(' ') || bot?.username || 'Bot';
+        const span = document.createElement('span');
+        span.classList.add('time-post-author', 'time-business-bot');
+        span.title = I18n.format('ChatAutomation.ViaBotTooltip', true);
+        span.append(wrapEmojiText(botName));
+        span.insertAdjacentHTML('beforeend', '<span class="time-post-author-comma">,' + NBSP + '</span>');
+        args.push(span);
+      }
+
+      if(isAnchoredEphemeralMessage(message)) {
+        args.unshift(editedSpan = makeUpdated());
+      } else if(!editedPrimary && message.edit_date && chatType !== ChatType.Scheduled && !message.pFlags.edit_hide) {
         args.unshift(editedSpan = makeEdited());
       }
 
       if(chatType !== ChatType.Pinned && message.pFlags.pinned) {
-        const i = Icon('pinnedchat', 'time-icon', 'time-pinned', 'time-part');
+        const i = Icon('pinnedchat_filled', 'time-icon', 'time-pinned', 'time-part');
         args.unshift(i);
       }
 
@@ -276,7 +340,7 @@ export namespace MessageRender {
         inlineStars.classList.add('inline-stars', 'bubble-meta-inline-stars');
         inlineStars.append(
           numberThousandSplitterForStars(+message.paid_message_stars * Math.max(groupedMessagesCount || 0, 1)),
-          Icon('star')
+          Icon('star', 'inline-stars-icon')
         );
         args.push(inlineStars)
       }
@@ -304,12 +368,6 @@ export namespace MessageRender {
       args.push(time);
     }
 
-    let title = /* isSponsored ? undefined :  */getFullDate(new Date(message.date * 1000));
-    if(isMessage) {
-      title += (message.edit_date && !message.pFlags.edit_hide ? `\nEdited: ${getFullDate(new Date(message.edit_date * 1000))}` : '') +
-        (fwdFrom ? `\nOriginal: ${getFullDate(new Date(fwdFrom.saved_date || fwdFrom.date * 1000))}` : '');
-    }
-
     const timeSpan = document.createElement('span');
     timeSpan.classList.add('time');
     // if(title) timeSpan.title = title;
@@ -321,7 +379,9 @@ export namespace MessageRender {
 
     let clonedArgs = args;
     if(editedSpan) {
-      clonedArgs[clonedArgs.indexOf(editedSpan)] = makeEdited();
+      clonedArgs[clonedArgs.indexOf(editedSpan)] = isAnchoredEphemeralMessage(message) ?
+        makeUpdated() :
+        makeEdited();
     }
     // if(sponsoredSpan) {
     //   clonedArgs[clonedArgs.indexOf(sponsoredSpan)] = makeSponsored();
@@ -350,7 +410,9 @@ export namespace MessageRender {
           a;
     });
     if(time) {
-      clonedArgs[clonedArgs.length - 1] = makeTime(date, includeDate); // clone time
+      clonedArgs[clonedArgs.length - 1] = editedPrimary ? // clone time
+        makeEditedTime(date, new Date(editDate * 1000)) :
+        makeTime(date, includeDate);
     }
     inner.append(...clonedArgs);
 
@@ -371,7 +433,7 @@ export namespace MessageRender {
     const isFooter = !bubble.classList.contains('sticker') &&
       !bubble.classList.contains('emoji-big') &&
       !bubble.classList.contains('round');
-    const repliesFooter = new RepliesElement();
+    const repliesFooter = RepliesElement.create();
     repliesFooter.message = message;
     repliesFooter.type = isFooter ? 'footer' : 'beside';
     repliesFooter.loadPromises = loadPromises;
@@ -396,6 +458,7 @@ export namespace MessageRender {
     isOut: boolean,
     fromUpdate?: boolean
   }) => {
+    const managers = bindManagersToSession(rootScope.managers);
     const isReplacing = !bubbleContainer;
     if(isReplacing) {
       bubbleContainer = bubble.querySelector('.bubble-content');
@@ -420,7 +483,7 @@ export namespace MessageRender {
       );
 
     const originalMessage = !isStoryReply && apiManagerProxy.getMessageByPeer(replyToPeerId, message.reply_to_mid);
-    const originalStory = isStoryReply && await rootScope.managers.acknowledged.appStoriesManager.getStoryById(replyToPeerId, replyTo.story_id);
+    const originalStory = isStoryReply && await managers.acknowledged.appStoriesManager.getStoryById(replyToPeerId, replyTo.story_id);
     let originalPeerTitle: string | HTMLElement | DocumentFragment;
 
     let isReplyFromAnotherPeer = false;
@@ -440,7 +503,7 @@ export namespace MessageRender {
 
     if(isStoryReply) {
       if(!originalStory.cached) {
-        rootScope.managers.appMessagesManager.fetchMessageReplyTo(message);
+        managers.appMessagesManager.fetchMessageReplyTo(message);
         // needUpdate.push(forUpdate = {replyToPeerId, replyStoryId: replyTo.story_id, mid: message.mid, peerId: message.peerId});
         originalPeerTitle = i18n('Loading');
       } else {
@@ -468,7 +531,7 @@ export namespace MessageRender {
         originalPeerTitle = i18n('DeletedMessage');
       } else {
         // needUpdate.push(forUpdate = {replyToPeerId, replyMid: message.reply_to_mid, mid: message.mid, peerId: message.peerId});
-        rootScope.managers.appMessagesManager.fetchMessageReplyTo(message);
+        managers.appMessagesManager.fetchMessageReplyTo(message);
 
         originalPeerTitle = i18n('Loading');
       }

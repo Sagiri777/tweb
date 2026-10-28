@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import forEachReverse from '@helpers/array/forEachReverse';
 import copy from '@helpers/object/copy';
 import {ConferenceEntry} from '@lib/calls/localConferenceDescription';
@@ -15,16 +9,16 @@ import parseMediaSectionInfo from '@lib/calls/helpers/parseMediaSectionInfo';
 export default function fixLocalOffer(options: {
   offer: RTCSessionDescriptionInit,
   data: UpdateGroupCallConnectionData,
-  skipAddingMulticast?: boolean
+  // Simulcast layers of the sending video section (see
+  // getVideoSimulcastLayerCount); 1 sends a single stream.
+  simulcastLayers?: number
   // mids?: string[]
 }) {
   const {offer, data} = options;
   const sdp = parseSdp(offer.sdp);
   let hasMunged = false;
 
-  if(!options.skipAddingMulticast) {
-    hasMunged = addSimulcast(sdp) || hasMunged;
-  }
+  hasMunged = addSimulcast(sdp, options.simulcastLayers ?? 3) || hasMunged;
 
   // const bundleLine = parsedSdp.session.lines.find((line) => line.Ha?.key === 'group');
   // const bundleMids = bundleLine.value.split(' ').slice(1);
@@ -55,6 +49,15 @@ export default function fixLocalOffer(options: {
     const localMLine = mediaLine.toString();
 
     const codec = data[section.mediaType];
+    // Pre-added recvonly transceivers (used by the conference path to
+    // receive-side pre-attach RTCRtpScriptTransform before the decoder
+    // exists) leave us with extra audio/video m-lines that the server's
+    // join response has no codec mapping for. Skip munging — Chrome's own
+    // SDP is fine; we only need to munge the sending-side mids whose
+    // codecs we're aligning with the server's list.
+    if(!codec) {
+      return;
+    }
     const payloadTypes = codec['payload-types'];
 
     /* forEachReverse(payloadTypes, (payloadType, idx, arr) => {

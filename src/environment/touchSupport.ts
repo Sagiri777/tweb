@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 const hasWindow = typeof window !== 'undefined';
 const hasDocument = typeof document !== 'undefined';
 type DocumentTouchConstructor = new(...args: any[]) => EventTarget;

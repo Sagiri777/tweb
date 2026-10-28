@@ -10,9 +10,8 @@ import {archiveDialogTagName} from './archiveDialog';
 import confirmationPopup from './confirmationPopup';
 import createFeatureDetailsIconSticker from './featureDetailsIconSticker';
 import showFeatureDetailsPopup from './popups/featureDetails';
-import appSidebarLeft from './sidebarLeft';
-import {AppArchiveSettingsTab} from './solidJsTabs/tabs';
 import {ButtonMenuItemOptionsVerifiable} from './buttonMenu';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 
 type CreateArchiveDialogContextMenuArgs = {
@@ -48,6 +47,13 @@ export const getArchiveContextMenuButtons = (): ButtonMenuItemOptionsVerifiable[
   const markAllAsRead = createMarkAllAsReadHandler();
 
   return [
+    {
+      icon: 'search',
+      text: 'Search',
+      onClick: () => {
+        hotReloadGuard.appSidebarLeft.openArchiveSearch();
+      }
+    },
     {
       icon: 'movetomenu',
       text: 'Archive.HideFromChatList',
@@ -88,7 +94,7 @@ export const getArchiveContextMenuButtons = (): ButtonMenuItemOptionsVerifiable[
       icon: 'tools',
       text: 'ArchiveSettings',
       onClick: () => {
-        appSidebarLeft.createTab(AppArchiveSettingsTab).open();
+        hotReloadGuard.appSidebarLeft.createTab(hotReloadGuard.tabs.AppArchiveSettingsTab).open();
       }
     },
     {
@@ -107,7 +113,10 @@ function createMarkAllAsReadHandler() {
   const markAllAsRead = async() => {
     try {
       isLoading = true;
-      rootScope.managers.dialogsStorage.markFolderAsRead(FOLDER_ID_ARCHIVE);
+      rootScope.managers.dialogsStorage.markFolderAsRead(
+        FOLDER_ID_ARCHIVE,
+        true
+      );
     } finally {
       isLoading = false;
     }
@@ -119,7 +128,8 @@ function createMarkAllAsReadHandler() {
 };
 
 async function getUnreadCount() {
-  const {unreadCount} = await rootScope.managers.dialogsStorage.getFolderUnreadCount(FOLDER_ID_ARCHIVE);
+  const {unreadCount} = await rootScope.managers.dialogsStorage
+  .getFolderUnreadCount(FOLDER_ID_ARCHIVE, true);
   return unreadCount;
 };
 
@@ -128,16 +138,16 @@ function openFeatureDetails() {
     title: i18n('ArchiveFeatureDetails.Title'),
     subtitle: i18n('ArchiveFeatureDetails.Subtitle', [anchorCallback(() => {
       close();
-      appSidebarLeft.createTab(AppArchiveSettingsTab).open();
+      hotReloadGuard.appSidebarLeft.createTab(hotReloadGuard.tabs.AppArchiveSettingsTab).open();
     })]),
     rows: [
       {
-        icon: 'archive',
+        icon: 'archive_filled',
         title: i18n('ArchiveFeatureDetails.HowTo.Title'),
         subtitle: i18n('ArchiveFeatureDetails.HowTo.Subtitle', [i18n('Archive'), i18n('Unarchive')])
       },
       {
-        icon: 'eyecross_outline',
+        icon: 'eyecross',
         title: i18n('ArchiveFeatureDetails.Hide.Title'),
         subtitle: i18n('ArchiveFeatureDetails.Hide.Subtitle', [i18n('Archive.HideFromChatList')])
       },

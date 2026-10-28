@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import type {ReactionsContext} from '@appManagers/appReactionsManager';
 import forEachReverse from '@helpers/array/forEachReverse';
 import callbackifyAll from '@helpers/callbackifyAll';
@@ -11,8 +5,7 @@ import positionElementByIndex from '@helpers/dom/positionElementByIndex';
 import {makeMediaSize} from '@helpers/mediaSize';
 import {Middleware, MiddlewareHelper} from '@helpers/middleware';
 import {ReactionCount, SavedReactionTag} from '@layer';
-import appImManager from '@lib/appImManager';
-import {AppManagers} from '@lib/managers';
+import {ReadingManagers} from '@lib/managers';
 import reactionsEqual from '@appManagers/utils/reactions/reactionsEqual';
 import {CustomEmojiRendererElement} from '@lib/customEmoji/renderer';
 import rootScope from '@lib/rootScope';
@@ -22,6 +15,8 @@ import ReactionElement, {ReactionLayoutType, REACTIONS_DISPLAY_COUNTER_AT, REACT
 import {getHeavyAnimationPromise} from '@hooks/useHeavyAnimationCheck';
 import pause from '@helpers/schedulers/pause';
 import {Accessor, Setter} from 'solid-js';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
+import {hotListen} from '@helpers/hotModule';
 
 
 const CLASS_NAME = 'reactions';
@@ -47,8 +42,37 @@ export function getPendingPaidReactionKey(message: ReactionsContext) {
   return message.peerId + '_' + message.mid;
 }
 
+// Cache of "may this peer's posts show a paid (star) reaction" so we don't make a
+// worker round-trip per bubble. Resolves to a boolean once known; cleared when the
+// peer's full info changes (an admin may toggle paid reactions on/off).
+const PAID_REACTION_AVAILABLE: Map<PeerId, MaybePromise<boolean>> = new Map();
+
+function getPaidReactionAvailable(managers: ReadingManagers, peerId: PeerId): MaybePromise<boolean> {
+  let value = PAID_REACTION_AVAILABLE.get(peerId);
+  if(value === undefined) {
+    value = managers.appReactionsManager.isPaidReactionAvailable(peerId);
+    PAID_REACTION_AVAILABLE.set(peerId, value);
+    if(value instanceof Promise) {
+      value.then(
+        (resolved) => PAID_REACTION_AVAILABLE.set(peerId, resolved),
+        () => PAID_REACTION_AVAILABLE.delete(peerId)
+      );
+    }
+  }
+
+  return value;
+}
+
+hotListen(import.meta.hot, rootScope, 'chat_full_update', (chatId) => {
+  PAID_REACTION_AVAILABLE.delete(chatId.toPeerId(true));
+});
+
+hotListen(import.meta.hot, rootScope, 'account_switched', () => {
+  PAID_REACTION_AVAILABLE.clear();
+});
+
 export const savedReactionTags: SavedReactionTag[] = [];
-rootScope.addEventListener('saved_tags', ({savedPeerId, tags}) => {
+hotListen(import.meta.hot, rootScope, 'saved_tags', ({savedPeerId, tags}) => {
   if(savedPeerId) {
     return;
   }
@@ -66,13 +90,18 @@ rootScope.addEventListener('saved_tags', ({savedPeerId, tags}) => {
 });
 
 export default class ReactionsElement extends HTMLElement {
+  public static create() {
+    // the registered class: after a hot update this module's class is a copy, which the element registry does not know
+    return new (customElements.get(TAG_NAME) as typeof ReactionsElement)();
+  }
+
   private context: ReactionsContext;
   private key: string;
   private isPlaceholder: boolean;
   private type: ReactionLayoutType;
   private sorted: ReactionElement[];
   private onConnectCallback: () => void;
-  private managers: AppManagers;
+  private managers: ReadingManagers;
   private middleware: Middleware;
   private middlewareHelpers: Map<ReactionElement, MiddlewareHelper>;
   public customEmojiRenderer: CustomEmojiRendererElement;
@@ -80,6 +109,11 @@ export default class ReactionsElement extends HTMLElement {
   private animationGroup: AnimationItemGroup;
   private lazyLoadQueue: LazyLoadQueue;
   private forceCounter: boolean;
+  // * the bubble is raised for a paid reaction's effect by a class of its own (a `:has()` of it was
+  // * searched through every bubble restyled): given when the effect starts or the strip is put into
+  // * a bubble, whichever comes last
+  private paidEffect: boolean;
+  private paidEffectBubble: HTMLElement;
 
   constructor() {
     super();
@@ -101,6 +135,19 @@ export default class ReactionsElement extends HTMLElement {
       this.onConnectCallback();
       this.onConnectCallback = undefined;
     }
+
+    this.syncPaidEffectBubble();
+  }
+
+  private syncPaidEffectBubble() {
+    const bubble = this.paidEffect ? this.closest<HTMLElement>('.bubble') : undefined;
+    if(bubble === this.paidEffectBubble) {
+      return;
+    }
+
+    this.paidEffectBubble?.classList.remove('has-paid-effect');
+    bubble?.classList.add('has-paid-effect');
+    this.paidEffectBubble = bubble;
   }
 
   disconnectedCallback() {
@@ -212,6 +259,31 @@ export default class ReactionsElement extends HTMLElement {
     this.render(changedResults, waitPromise);
   }
 
+  private shouldAddEmptyPaidReaction(counts: ReactionCount[]) {
+    if(
+      this.type !== ReactionLayoutType.Block ||
+      this.context.peerId.isUser() ||
+      !counts.length ||
+      counts.some((reactionCount) => reactionCount.reaction._ === 'reactionPaid')
+    ) {
+      return false;
+    }
+
+    const available = getPaidReactionAvailable(this.managers, this.context.peerId);
+    if(available instanceof Promise) {
+      // Availability isn't known yet — re-render once it resolves (if still mounted).
+      // Swallow rejections (e.g. CHANNEL_PRIVATE): a failed lookup just means no button.
+      available.then((value) => {
+        if(value && this.middleware?.()) {
+          this.render();
+        }
+      }, () => {});
+      return false;
+    }
+
+    return available;
+  }
+
   public render(changedResults?: ReactionCount[], waitPromise?: Promise<any>) {
     const reactions = this.context.reactions;
     const hasReactions = !!(reactions && reactions.results.length);
@@ -220,7 +292,7 @@ export default class ReactionsElement extends HTMLElement {
 
     // const availableReactionsResult = this.managers.appReactionsManager.getAvailableReactions();
     // callbackify(availableReactionsResult, () => {
-    const counts = hasReactions ? (
+    let counts = hasReactions ? (
       reactions.results
         // availableReactionsResult instanceof Promise ?
         //   reactions.results :
@@ -228,6 +300,13 @@ export default class ReactionsElement extends HTMLElement {
         //     return this.managers.appReactionsManager.isReactionActive(reactionCount.reaction);
         //   })
       ) : [];
+
+    // Like the official clients: on channel/group posts that already have reactions
+    // but no paid one, prepend an empty (count 0) paid star reaction button so users
+    // can send stars. A fresh array — never mutate the message's own results.
+    if(this.shouldAddEmptyPaidReaction(counts)) {
+      counts = [{_: 'reactionCount', reaction: {_: 'reactionPaid'}, count: 0}, ...counts];
+    }
 
     // counts = counts.filter((count) => count.reaction._ !== 'reactionPaid');
 
@@ -260,7 +339,7 @@ export default class ReactionsElement extends HTMLElement {
       let reactionElement: ReactionElement = this.sorted.find((reactionElement) => reactionsEqual(reactionElement.reactionCount.reaction, reactionCount.reaction));
       if(!reactionElement) {
         const middlewareHelper = this.middleware.create();
-        reactionElement = new ReactionElement();
+        reactionElement = ReactionElement.create();
         reactionElement.init(this.type, middlewareHelper.get());
         this.middlewareHelpers.set(reactionElement, middlewareHelper);
       }
@@ -290,7 +369,7 @@ export default class ReactionsElement extends HTMLElement {
       reactionElement.isUnread = isUnread;
       reactionElement.setIsChosen(
         isPaidReaction ?
-          !!pending || reactions.top_reactors.some((reactor) => reactor.pFlags.my && reactor.count) :
+          !!pending || !!reactions.top_reactors?.some((reactor) => reactor.pFlags.my && reactor.count) :
           undefined
       );
 
@@ -314,7 +393,11 @@ export default class ReactionsElement extends HTMLElement {
       paidReactionElement.setPaidReactionCounter(pendingPaidReaction.count());
       if(!paidReactionElement.classList.contains('effect-active')) {
         paidReactionElement.classList.add('effect-active');
+        this.paidEffect = true;
+        this.syncPaidEffectBubble();
         pendingPaidReaction.abortController.signal.addEventListener('abort', () => {
+          this.paidEffect = false;
+          this.syncPaidEffectBubble();
           paidReactionElement.classList.remove('effect-active');
           paidReactionElement.querySelectorAll('.reaction-sticker-activate').forEach((it) => it.remove());
           paidReactionElement.destroyPaidReactionCounter();
@@ -380,7 +463,7 @@ export default class ReactionsElement extends HTMLElement {
   private async handleChangedResults(changedResults: ReactionCount[], waitPromise?: Promise<any>, withDelay?: boolean) {
     await getHeavyAnimationPromise();
     // ! temp
-    if(this.context.peerId !== appImManager.chat.peerId) return;
+    if(this.context.peerId !== hotReloadGuard.appImManager.chat.peerId) return;
     if(withDelay) {
       waitPromise = (waitPromise || Promise.resolve()).then(() => pause(150));
     }
@@ -398,3 +481,6 @@ export default class ReactionsElement extends HTMLElement {
 if(!customElements.get(TAG_NAME)) {
   customElements.define(TAG_NAME, ReactionsElement);
 }
+
+// a method edited here takes effect on the reactions on screen, without a reload (see @helpers/hotRegistry)
+if(import.meta.hot) import.meta.hot.accept();

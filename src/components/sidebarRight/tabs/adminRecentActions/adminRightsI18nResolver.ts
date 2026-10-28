@@ -2,12 +2,14 @@ import {ChatAdminRights} from '@layer';
 import {LangPackKey} from '@lib/langPack';
 
 
-type Args = { isBroadcast: boolean };
+type Args = {isBroadcast: boolean};
 
 const adminRightToI18n: Record<keyof ChatAdminRights.chatAdminRights['pFlags'], (a: Args) => LangPackKey> = {
   other: () => 'AdminRights.Other',
   manage_call: () => 'Channel.EditAdmin.ManageCalls',
   manage_direct_messages: () => 'Channel.EditAdmin.ManageDirectMessages',
+  manage_linked_peers: () => 'AdminRights.Other',
+  manage_welcome_messages: () => 'AdminRights.ManageWelcomeMessages',
 
   change_info: ({isBroadcast}) =>
     isBroadcast ? 'EditAdminChangeChannelInfo' : 'EditAdminChangeGroupInfo',
@@ -22,7 +24,7 @@ const adminRightToI18n: Record<keyof ChatAdminRights.chatAdminRights['pFlags'], 
   add_admins: () => 'EditAdminAddAdmins',
   anonymous: () => 'EditAdminSendAnonymously',
   manage_topics: () => 'ManageTopicsPermission',
-  manage_ranks: () => 'AdminRights.Other',
+  manage_ranks: () => 'EditAdminManageRanks',
 
   invite_users: ({isBroadcast}) =>
     isBroadcast ?

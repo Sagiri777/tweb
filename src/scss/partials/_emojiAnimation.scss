@@ -1,16 +1,8 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 @use "../shared" as *;
 
 .emoji-animation {
   position: absolute;
   pointer-events: none;
-
-  // @include sidebar-transform(true);
 
   &-container {
     position: absolute; 
@@ -22,4 +14,18 @@
     overflow: hidden;
     z-index: 5;
   }
+}
+
+// * art that faces the middle of the chat (a premium sticker): flipped on the left side, which is an
+// * incoming message's (at the line's start) in LTR and an outgoing one's (at the end) in RTL
+.reflect-x-at-start {
+  transform: scaleX(-1);
+
+  .is-rtl & {
+    transform: none;
+  }
+}
+
+.is-rtl .reflect-x-at-end {
+  transform: scaleX(-1);
 }

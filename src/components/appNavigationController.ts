@@ -1,16 +1,14 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import {MOUNT_CLASS_TO} from '@config/debug';
 import {IS_FIREFOX, IS_MOBILE_SAFARI} from '@environment/userAgent';
 import {logger} from '@lib/logger';
 import blurActiveElement from '@helpers/dom/blurActiveElement';
 import cancelEvent from '@helpers/dom/cancelEvent';
+import {bindActiveWindowListener} from '@helpers/appWindow';
 import isSwipingBackSafari from '@helpers/dom/isSwipingBackSafari';
 import tabId from '@config/tabId';
+import {getCurrentAccount} from '@lib/accounts/getCurrentAccount';
+import {getCurrentAccountFromURL} from '@lib/accounts/getCurrentAccountFromURL';
+import {createAppURLForAccount} from '@lib/accounts/createAppURLForAccount';
 
 const HAS_WINDOW = typeof window !== 'undefined';
 
@@ -19,9 +17,14 @@ export type NavigationItem = {
     'esg' | 'multiselect' | 'input-helper' | 'autocomplete-helper' | 'markup' |
     'global-search' | 'voice' | 'mobile-search' | 'filters' | 'global-search-focus' |
     'toast' | 'dropdown' | 'forum' | 'stories' | 'stories-focus' | 'topbar-search' |
-    'settings-popup' | 'monoforum',
+    'settings-popup' | 'profile-popup' | 'settings-search' | 'monoforum' | 'inline-message-input',
   onPop: (canAnimate: boolean) => boolean | void,
-  onEscape?: () => boolean,
+  /**
+   * Closes it whatever it is doing - before it ever showed, in the middle of a move - settling once it is
+   * gone, for what may not wait for it to accept onPop (an account switch).
+   */
+  closeOutright?: () => Promise<void>,
+  onEscape?: (event: KeyboardEvent) => boolean,
   noHistory?: boolean,
   noBlurOnPop?: boolean,
   removed?: boolean,
@@ -30,6 +33,11 @@ export type NavigationItem = {
 
 export const USE_NAVIGATION_API = HAS_WINDOW && 'navigation' in window && !IS_FIREFOX;
 const TRY_TO_TRAVERSE = USE_NAVIGATION_API && true; // * not tested for legacy api
+
+// * an entry of the history from before the tab switched accounts in place still names the previous one
+function isOtherAccountURL(url: string) {
+  return getCurrentAccountFromURL(url) !== getCurrentAccount();
+}
 
 export class AppNavigationController {
   private navigations: Array<NavigationItem>;
@@ -88,7 +96,9 @@ export class AppNavigationController {
       }
     }
 
-    window.addEventListener('keydown', this.onKeyDown, {capture: true, passive: false});
+    // Follow the active app window so Esc / back-navigation keys keep working when the client is
+    // popped into a Document PiP window (its key events fire on the PiP window, not the tab's).
+    bindActiveWindowListener((w) => w, 'keydown', this.onKeyDown, {capture: true, passive: false});
 
     if(IS_MOBILE_SAFARI) {
       const options = {passive: true};
@@ -106,7 +116,7 @@ export class AppNavigationController {
       const destinationHash = new URL(event.destination.url).hash;
       if(
         event.navigationType === 'traverse' &&
-        destinationHash !== this.currentHash
+        (destinationHash !== this.currentHash || isOtherAccountURL(event.destination.url))
       ) {
         this.modifyHistoryFromEvent(() => { // * fix hash
           log('will fix hash', destinationHash, this.currentHash);
@@ -184,7 +194,17 @@ export class AppNavigationController {
   };
 
   private onPopState = (e: PopStateEvent) => {
-    this._onPopState(window.location.hash, e.state);
+    let hash = window.location.hash;
+    if(isOtherAccountURL(location.href)) {
+      // * its route is the previous account's: the entry takes the current account and route, so stepping
+      // * back opens nothing of the previous account. Its state stays - it tells the app's entries from
+      // * the one the tab was opened on
+      const url = createAppURLForAccount(getCurrentAccount(), undefined, true);
+      url.hash = hash = this.currentHash;
+      history.replaceState(history.state, '', url);
+    }
+
+    this._onPopState(hash, e.state);
   };
 
   private _onPopState(hash: string, id: number) {
@@ -228,7 +248,7 @@ export class AppNavigationController {
   private onKeyDown = (e: KeyboardEvent) => {
     const item = this.navigations[this.navigations.length - 1];
     if(!item) return;
-    if(e.key === 'Escape' && this.canCloseOnEscape() && (item.onEscape ? item.onEscape() : true)) {
+    if(e.key === 'Escape' && !e.defaultPrevented && this.canCloseOnEscape() && (item.onEscape ? item.onEscape(e) : true)) {
       cancelEvent(e);
       this.back(item.type);
     }
@@ -425,7 +445,7 @@ export class AppNavigationController {
     this.debug && this.log.warn('replace');
 
     if(!url) {
-      url = new URL(location.href);
+      url = createAppURLForAccount(getCurrentAccount(), undefined, true);
       url.hash = this.overriddenHash;
     }
 
@@ -519,6 +539,24 @@ export class AppNavigationController {
     }
     this.modifyHistoryFromEvent(() => {
       location.reload();
+    });
+  }
+
+  /**
+   * The tab switched to another account in place: nothing of the previous one is left to go back
+   * to - but what outlives the switch (a call's panels, `kept`) - and the address names the new one
+   * (a reload, a push or the service worker read it from there).
+   */
+  public resetForAccountSwitch(url: URL, kept: NavigationItem[] = []) {
+    for(let index = this.navigations.length - 1; index >= 0; --index) {
+      if(!kept.includes(this.navigations[index])) {
+        this.spliceItems(index, 1);
+      }
+    }
+
+    this.currentHash = this.overriddenHash = url.hash;
+    this.modifyHistoryFromEvent(() => {
+      this.replaceState(url);
     });
   }
 

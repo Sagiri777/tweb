@@ -1,4 +1,4 @@
-import BezierEasing from '@vendor/bezierEasing';
+import {defaultEasing} from '@helpers/easings';
 import {lerp} from '@helpers/lerp';
 import {requestRAF} from '@helpers/solid/requestRAF';
 
@@ -8,8 +8,7 @@ type AnimateValueOptions = {
   onEnd?: () => void;
 };
 
-const defaultEasing = BezierEasing(0.42, 0.0, 0.58, 1.0);
-export const simpleEasing = BezierEasing(0.25, 0.1, 0.25, 1);
+export {simpleEasing} from '@helpers/easings';
 
 export function animateValue<T extends number | number[]>(
   start: T,
@@ -27,7 +26,7 @@ export function animateValue<T extends number | number[]>(
     if(!startTime) startTime = currentTime;
 
     const elapsed = currentTime - startTime;
-    const progress = Math.min(elapsed / duration, 1);
+    const progress = duration ? Math.min(elapsed / duration, 1) : 1;
     const easedProgress = easing(progress);
 
     if(start instanceof Array && end instanceof Array) {

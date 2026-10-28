@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import SwipeHandler, {SwipeHandlerOptions} from '@components/swipeHandler';
 import cancelEvent from '@helpers/dom/cancelEvent';
 import findUpClassName from '@helpers/dom/findUpClassName';
@@ -11,6 +5,9 @@ import isSwipingBackSafari from '@helpers/dom/isSwipingBackSafari';
 
 export type SwipeHandlerHorizontalOptions = SwipeHandlerOptions & {
   // xThreshold?: number
+  // how far a gesture goes before its axis is decided: a mouse's first move is a pixel or two,
+  // as often down as sideways
+  axisThreshold?: number
 };
 
 export default function handleHorizontalSwipe(options: SwipeHandlerHorizontalOptions) {
@@ -28,6 +25,10 @@ export default function handleHorizontalSwipe(options: SwipeHandlerHorizontalOpt
 
       if(!cancelY && Math.abs(yDiff) > 20) {
         return true;
+      }
+
+      if(!cancelY && Math.max(Math.abs(xDiff), Math.abs(yDiff)) < (options.axisThreshold ?? 0)) {
+        return;
       }
 
       if(Math.abs(xDiff) > Math.abs(yDiff)) {

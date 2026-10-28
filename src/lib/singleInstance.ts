@@ -1,8 +1,4 @@
 /*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- *
  * Originally from:
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
@@ -128,6 +124,11 @@ export class SingleInstance extends EventListenerBase<{
       this.checkInstance(false);
       this.dispatchEvent('activated');
     }
+  }
+
+  // * the last active instance names its account (t.me sends the user back to it): this one has another now
+  public onAccountSwitch() {
+    this.checkInstance();
   }
 
   private deactivateInstance(reason: InstanceDeactivateReason) {

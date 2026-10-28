@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import {AppManager} from '@appManagers/manager';
 import {HelpCountriesList} from '@layer';
 import App from '@config/app';
@@ -25,6 +19,14 @@ export class AppLangPackManager extends AppManager {
       lang_code: langCode,
       lang_pack: langPack
     }, {override: ignoreCache});
+  }
+
+  /** The language itself: its name and, `pFlags.rtl`, whether it is written right to left. */
+  public getLanguage(langCode: string, langPack: string) {
+    return this.apiManager.invokeApiCacheable('langpack.getLanguage', {
+      lang_code: langCode,
+      lang_pack: langPack
+    });
   }
 
   public getCountriesList(langCode: string, ignoreCache?: boolean) {

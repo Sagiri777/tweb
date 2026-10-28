@@ -1,14 +1,10 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import type {MyDocument} from '@appManagers/appDocsManager';
-import {applyColorOnContext} from '@lib/rlottie/rlottiePlayer';
+import type LottiePlayer from '@lib/lottie/lottiePlayer';
+import {applyColorOnContext} from '@lib/lottie/lottiePlayer';
 import rootScope from '@lib/rootScope';
 import getStickerThumbKey from '@lib/storages/utils/thumbs/getStickerThumbKey';
 import customProperties from '@helpers/dom/customProperties';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 const savingLottiePreview: {[docId: DocId]: {width: number, height: number}} = {};
 
@@ -35,7 +31,8 @@ const createCanvas = () => {
   sharedContext = sharedCanvas.getContext('2d');
 };
 
-export async function saveLottiePreview(doc: MyDocument, canvas: HTMLCanvasElement, toneIndex: number | string) {
+export async function saveLottiePreview(doc: MyDocument, canvas: HTMLCanvasElement | ImageBitmap, toneIndex: number | string) {
+  const managers = bindManagersToSession(rootScope.managers);
   const key = getStickerThumbKey(doc.id, toneIndex);
   const {width, height} = canvas;
   if(isSavingLottiePreview(doc, toneIndex, width, height)) {
@@ -47,7 +44,7 @@ export async function saveLottiePreview(doc: MyDocument, canvas: HTMLCanvasEleme
     height
   };
 
-  const thumb = await rootScope.managers.thumbsStorage.getStickerCachedThumb(doc.id, toneIndex);
+  const thumb = await managers.thumbsStorage.getStickerCachedThumb(doc.id, toneIndex);
   if(savingLottiePreview[key] !== saving) {
     return;
   }
@@ -56,7 +53,7 @@ export async function saveLottiePreview(doc: MyDocument, canvas: HTMLCanvasEleme
     return;
   }
 
-  if(typeof(toneIndex) === 'string') {
+  if(typeof(toneIndex) === 'string' || !(canvas instanceof HTMLCanvasElement)) {
     if(!sharedCanvas) {
       createCanvas();
     }
@@ -64,7 +61,9 @@ export async function saveLottiePreview(doc: MyDocument, canvas: HTMLCanvasEleme
     sharedCanvas.width = width;
     sharedCanvas.height = height;
     sharedContext.drawImage(canvas, 0, 0, width, height);
-    applyColorOnContext(sharedContext, customProperties.getProperty(toneIndex), 0, 0, width, height);
+    if(typeof(toneIndex) === 'string') {
+      applyColorOnContext(sharedContext, customProperties.getProperty(toneIndex), 0, 0, width, height);
+    }
     canvas = sharedCanvas;
   }
 
@@ -83,5 +82,24 @@ export async function saveLottiePreview(doc: MyDocument, canvas: HTMLCanvasEleme
     return;
   }
 
-  rootScope.managers.thumbsStorage.saveStickerPreview(doc.id, blob, width, height, toneIndex);
+  managers.thumbsStorage.saveStickerPreview(doc.id, blob, width, height, toneIndex);
+}
+
+export async function saveLottiePreviewFromPlayer(doc: MyDocument, player: LottiePlayer, toneIndex: number | string) {
+  if(!player.offscreen) {
+    return saveLottiePreview(doc, player.canvas[0], toneIndex);
+  }
+
+  if(isSavingLottiePreview(doc, toneIndex, player.width, player.height)) {
+    return; // guard runs BEFORE the export - no bitmap ships when nothing needs saving
+  }
+
+  try {
+    const {frame} = await player.exportFrame();
+    await saveLottiePreview(doc, frame, toneIndex);
+    frame.close?.();
+  } catch(err) {
+    // degrade to no persisted thumb - same as today's pre-firstFrame state
+    console.error('saveLottiePreviewFromPlayer: exportFrame failed', err, player);
+  }
 }

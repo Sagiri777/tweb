@@ -1,13 +1,14 @@
 import IS_TOUCH_SUPPORTED from '@environment/touchSupport';
 import ListenerSetter from '@helpers/listenerSetter';
-import {AppManagers} from '@lib/managers';
+import {AppManagers, ReadingManagers} from '@lib/managers';
 import {toastNew} from '@components/toast';
 import confirmationPopup from '@components/confirmationPopup';
 import {AppSelection} from '@components/chat/selection';
 import {createSignal} from 'solid-js';
 import {LangPackKey} from '../../lib/langPack';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
-export function toastStoryPinnedToProfile(managers: AppManagers, peerId: PeerId, pin: boolean) {
+export function toastStoryPinnedToProfile(managers: ReadingManagers, peerId: PeerId, pin: boolean) {
   if(peerId.isUser()) {
     return toastNew({langPackKey: pin ? 'StoryPinnedToProfile' : 'StoryArchivedFromProfile'});
   } else {
@@ -93,8 +94,11 @@ export class StoriesSelection extends AppSelection {
     const size = this.selectedMids.size;
     if(!size && !forceSelection) return;
 
+    // `forceSelection` enters selection mode with nothing selected yet (the album picker opens that
+    // way), so there is no peer and no mids — `cantPinDeleteStories` answers "can't" for an empty
+    // list, which is what an empty selection means.
     const peerId = this.selectedMids.keys().next().value;
-    const r = await this.managers.appStoriesManager.cantPinDeleteStories(peerId, Array.from(this.selectedMids.get(peerId)));
+    const r = await this.managers.appStoriesManager.cantPinDeleteStories(peerId, Array.from(this.selectedMids.get(peerId) ?? []));
     this._setCount(this.length());
     this._setCantPin(r.cantPin);
     this._setCantDelete(r.cantDelete);
@@ -134,6 +138,7 @@ export class StoriesSelection extends AppSelection {
   }
 
   public onDeleteStoriesClick = async(ids?: number[], peerId?: PeerId) => {
+    const managers = bindManagersToSession(this.managers);
     peerId ??= this.getSelectedStoriesPeerId();
     ids ||= [...this.selectedMids.get(peerId)];
     await confirmationPopup({
@@ -146,23 +151,24 @@ export class StoriesSelection extends AppSelection {
       }
     });
     this.cancelSelection();
-    this.managers.appStoriesManager.deleteStories(peerId, ids);
+    managers.appStoriesManager.deleteStories(peerId, ids);
   };
 
   public onPinStoriesClick = (ids: number[], pin: boolean, peerId?: PeerId) => {
+    const managers = bindManagersToSession(this.managers);
     peerId ??= this.getSelectedStoriesPeerId();
     ids ||= [...this.selectedMids.get(peerId)];
-    const promise = this.managers.appStoriesManager.togglePinned(peerId, ids, pin);
+    const promise = managers.appStoriesManager.togglePinned(peerId, ids, pin);
     this.cancelSelection();
     promise.then(async() => {
       if(ids.length === 1) {
-        toastStoryPinnedToProfile(this.managers, peerId, pin);
+        toastStoryPinnedToProfile(managers, peerId, pin);
       } else {
         let key: LangPackKey;
         if(peerId.isUser()) {
           key = pin ? 'StorySavedTitle' : 'StoryArchived';
         } else {
-          const isBroadcast = await this.managers.appChatsManager.isBroadcast(peerId.toChatId());
+          const isBroadcast = await managers.appChatsManager.isBroadcast(peerId.toChatId());
           if(isBroadcast) {
             key = pin ? 'StorySavedChannelTitle' : 'StoryChannelArchived';
           } else {

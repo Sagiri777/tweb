@@ -88,7 +88,7 @@ export function makeMessageMediaInput(media: MessageMedia, options: Partial<{
   }
 
   if(media._ === 'messageMediaPoll') {
-    const correctAnswers = media.results?.results?.filter((result) => result.pFlags?.correct).map((result) => result.option);
+    const correctAnswers = media.results?.results?.filter((result) => result.pFlags?.correct).flatMap((result) => Array.from(result.option));
 
     return rootScope.managers.appPollsManager.getInputMediaPoll(
       media.poll,

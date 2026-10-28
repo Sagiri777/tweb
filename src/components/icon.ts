@@ -1,7 +1,6 @@
 import {TGICO_CLASS} from '@helpers/tgico';
 import Icons from '@/icons';
-import IconsReverse from '@/iconsReverse';
-import I18n from '@lib/langPack';
+import {getIconMirrorClass} from '@/iconsReverse';
 
 export function getIconContent(icon: Icon) {
   return String.fromCharCode(parseInt(Icons[icon], 16));
@@ -15,6 +14,7 @@ type IconWithClass = {
 export function OverlayedIcon(icons: (Icon | IconWithClass)[], className?: string) {
   const span = document.createElement('span');
   span.classList.add('overlayed-icon', ...(className ? [className] : []));
+  span.setAttribute('aria-hidden', 'true');
 
   const getIcon = (icon: Icon | IconWithClass) => icon instanceof Object ? icon.icon : icon;
   const getClasses = (icon: Icon | IconWithClass) => icon instanceof Object ? [icon.className] : [];
@@ -27,11 +27,15 @@ export function OverlayedIcon(icons: (Icon | IconWithClass)[], className?: strin
 
 export default function Icon(icon: Icon, ...classes: string[]) {
   const span = document.createElement('span');
-  if(I18n.getIsRTL() && IconsReverse.has(icon)) {
-    classes.push('icon-reflect');
+  const mirrorClass = getIconMirrorClass(icon);
+  if(mirrorClass) {
+    classes.push(mirrorClass);
   }
 
   span.classList.add(TGICO_CLASS/* ...tgico(icon) */, ...classes);
   span.textContent = getIconContent(icon);
+  // The glyph is a private-use-area character — meaningless to assistive tech.
+  // The accessible name must come from the parent control's label instead.
+  span.setAttribute('aria-hidden', 'true');
   return span;
 }

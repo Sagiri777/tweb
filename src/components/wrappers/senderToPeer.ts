@@ -1,16 +1,12 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import {MyMessage} from '@appManagers/appMessagesManager';
 import getMessageSenderPeerIdOrName from '@appManagers/utils/messages/getMessageSenderPeerIdOrName';
 import {i18n} from '@lib/langPack';
 import rootScope from '@lib/rootScope';
 import wrapPeerTitle from '@components/wrappers/peerTitle';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 export default async function wrapSenderToPeer(message: MyMessage) {
+  const managers = bindManagersToSession(rootScope.managers);
   const senderTitle: HTMLElement = document.createElement('span');
   senderTitle.classList.add('sender-title');
 
@@ -24,7 +20,7 @@ export default async function wrapSenderToPeer(message: MyMessage) {
       })
   );
 
-  if(await rootScope.managers.appPeersManager.isAnyGroup(message.peerId) || fromMe) {
+  if(await managers.appPeersManager.isAnyGroup(message.peerId) || fromMe) {
     const peerTitle = await wrapPeerTitle({peerId: message.peerId});
     senderTitle.append(' ➝ ', peerTitle);
   }

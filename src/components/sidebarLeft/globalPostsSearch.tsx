@@ -5,25 +5,23 @@ import {Middleware} from '../../helpers/middleware';
 import styles from './globalPostsSearch.module.scss';
 import {I18nTsx} from '../../helpers/solid/i18n';
 import rootScope from '../../lib/rootScope';
+import Section from '../section';
 import {Message, SearchPostsFlood} from '../../layer';
 import Button from '../buttonTsx';
 import {i18n} from '../../lib/langPack';
-import PopupPremium from '../popups/premium';
 import classNames from '../../helpers/string/classNames';
 import {IconTsx} from '../iconTsx';
 import wrapEmojiText from '../../lib/richTextProcessor/wrapEmojiText';
 import {NULL_PEER_ID, STARS_CURRENCY} from '../../lib/appManagers/constants';
-import appDialogsManager, {DIALOG_LIST_ELEMENT_TAG} from '../../lib/appDialogsManager';
 import createMiddleware from '../../helpers/solid/createMiddleware';
 import {PreloaderTsx} from '../putPreloader';
-import findUpTag from '../../helpers/dom/findUpTag';
-import appImManager from '../../lib/appImManager';
 import paymentsWrapCurrencyAmount from '../../helpers/paymentsWrapCurrencyAmount';
 import {createCurrentTime} from '../../helpers/solid/createCurrentTime';
 import tsNow from '../../helpers/tsNow';
 import {wrapLeftDuration} from '../wrappers/wrapDuration';
 import usePremium from '../../stores/premium';
 import {toastNew} from '../toast';
+import {hotReloadGuard} from '@lib/solidjs/hotReloadGuardProvider';
 
 const renderHistoryResult = (options: {
   messages: (Message.message | Message.messageService)[]
@@ -32,7 +30,7 @@ const renderHistoryResult = (options: {
 }) => {
   const promises = options.messages.map(async(message) => {
     const loadPromises: Promise<any>[] = [];
-    const {dom} = appDialogsManager.addDialogAndSetLastMessage({
+    const {dom} = hotReloadGuard.appDialogsManager.addDialogAndSetLastMessage({
       peerId: message.peerId,
       container: false,
       avatarSize: 'bigger',
@@ -205,7 +203,7 @@ export function GlobalPostsSearch(props: {
       return (
         <Button
           class={classNames('btn-primary btn-color-primary', styles.button)}
-          onClick={() => PopupPremium.show()}
+          onClick={() => hotReloadGuard.showPremiumPopup()}
         >
           {i18n('PostsSearch.SubscribeToPremium')}
         </Button>
@@ -262,17 +260,18 @@ export function GlobalPostsSearch(props: {
     <div>
       <Switch>
         <Match when={results().length}>
-          <div
-            class={styles.results}
-            ref={(el) => {
-              appDialogsManager.setListClickListener({
-                list: el,
-                autonomous: true
-              })
-            }}
-          >
-            {results()}
-          </div>
+          <Section noShadow noDelimiter>
+            <div
+                  ref={(el) => {
+                hotReloadGuard.appDialogsManager.setListClickListener({
+                  list: el,
+                  autonomous: true
+                })
+              }}
+            >
+              {results()}
+            </div>
+          </Section>
         </Match>
         <Match when={loading() || !flood()}>
           <PreloaderTsx />

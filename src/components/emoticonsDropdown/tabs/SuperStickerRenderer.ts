@@ -1,12 +1,6 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import mediaSizes from '@helpers/mediaSizes';
 import {MyDocument} from '@appManagers/appDocsManager';
-import {AppManagers} from '@lib/managers';
+import {ReadingManagers} from '@lib/managers';
 import animationIntersector, {AnimationItemGroup} from '@components/animationIntersector';
 import LazyLoadQueue from '@components/lazyLoadQueue';
 import LazyLoadQueueRepeat from '@components/lazyLoadQueueRepeat';
@@ -20,7 +14,7 @@ export default class SuperStickerRenderer {
   private animated: Set<HTMLElement> = new Set();
   private regularLazyLoadQueue: LazyLoadQueue;
   private group: AnimationItemGroup;
-  private managers: AppManagers;
+  private managers: ReadingManagers;
   private intersectionObserverInit: IntersectionObserverInit;
   private visibleRenderOptions: Partial<Parameters<typeof wrapSticker>[0]>;
   private withLock: boolean
@@ -29,7 +23,7 @@ export default class SuperStickerRenderer {
   constructor(options: {
     regularLazyLoadQueue: LazyLoadQueue;
     group: AnimationItemGroup;
-    managers: AppManagers;
+    managers: ReadingManagers;
     intersectionObserverInit?: SuperStickerRenderer['intersectionObserverInit'];
     visibleRenderOptions?: SuperStickerRenderer['visibleRenderOptions'];
     withLock?: boolean
@@ -67,6 +61,7 @@ export default class SuperStickerRenderer {
       element = document.createElement('div');
       element.classList.add('grid-item', 'super-sticker');
       element.dataset.docId = '' + doc.id;
+      element.dataset.emoji = doc.stickerEmojiRaw || '';
 
       if(doc.animated) {
         this.observeAnimated(element);
@@ -176,11 +171,24 @@ export default class SuperStickerRenderer {
     const docId = element.dataset.docId;
     const doc = await this.managers.appDocsManager.getDoc(docId);
 
+    // the await above is a real worker round-trip - the cell may be back on
+    // screen; demolishing it now would yank a live canvas (visible blink).
+    // Bail and leave the old player alive - the visible flip that brought the
+    // cell back already queued processVisible, which cleans and re-wraps. The
+    // dropdown 'closed' sweep clears visibility synchronously before these
+    // continuations run, so it still demolishes hidden cells.
+    if(this.lazyLoadQueue.intersector.isVisible(element)) {
+      return;
+    }
+
     // console.log('STICKER INvisible:', /* div,  */docId);
     this.checkAnimationContainer(element, false);
 
     element.middlewareHelper?.clean();
-    element.replaceChildren();
+    // no replaceChildren - the thumb re-wrap adopts the dead canvas (pixels
+    // retained) as its bottom layer and retires it only under the decoded
+    // preview img (replacePreviousMedia), so a mis-timed demolition can never
+    // produce an empty/silhouette frame
     this.renderSticker(doc, element as HTMLDivElement);
   };
 }

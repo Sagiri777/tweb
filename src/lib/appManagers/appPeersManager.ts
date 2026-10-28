@@ -1,19 +1,16 @@
 /*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- *
  * Originally from:
  * https://github.com/zhukov/webogram
  * Copyright (C) 2014 Igor Zhukov <igor.beatle@gmail.com>
  * https://github.com/zhukov/webogram/blob/master/LICENSE
  */
 
-import type {Chat, DialogPeer, InputDialogPeer, InputNotifyPeer, InputPeer, Peer, RestrictionReason, User} from '@layer';
+import type {Chat, DialogPeer, InputDialogPeer, InputNotifyPeer, InputPeer, Message, Peer, RestrictionReason, User} from '@layer';
 import type {LangPackKey} from '@lib/langPack';
 import isObject from '@helpers/object/isObject';
 import {AppManager} from '@appManagers/manager';
 import getPeerId from '@appManagers/utils/peers/getPeerId';
+import getChatMigratedTo from '@appManagers/utils/peers/getChatMigratedTo';
 import isUser from '@appManagers/utils/peers/isUser';
 import isAnyChat from '@appManagers/utils/peers/isAnyChat';
 import {NULL_PEER_ID} from '@appManagers/constants';
@@ -25,9 +22,15 @@ import MTProtoMessagePort from '@lib/mainWorker/mainMessagePort';
 import callbackify from '@helpers/callbackify';
 import {appSettings} from '@stores/appSettings';
 import {ignoreRestrictionReasons} from '@helpers/restrictions';
+import {isTempId} from '@appManagers/utils/messages/isTempId';
 
-export type PeerType = 'channel' | 'chat' | 'megagroup' | 'group' | 'saved' | 'savedDialog' | 'monoforum' | 'monoforum_thread' | 'botforum_thread';
+export type PeerType = 'channel' | 'community' | 'chat' | 'megagroup' | 'group' | 'saved' | 'savedDialog' | 'monoforum' | 'monoforum_thread' | 'botforum_thread';
+// * a few messages per `min` peer are enough: one of them is still around when it is needed
+const MESSAGES_WITH_PEER_LIMIT = 3;
+
 export class AppPeersManager extends AppManager {
+  private messagesWithPeer: Map<PeerId, Array<{peerId: PeerId, mid: number}>> = new Map();
+
   public get peerId() {
     return this.appUsersManager.userId.toPeerId();
   }
@@ -41,13 +44,88 @@ export class AppPeersManager extends AppManager {
     this.appUsersManager.saveApiUsers(object.users);
   }
 
+  /**
+   * The access_hash of a `min` user or channel is accepted by a handful of methods only (bans,
+   * reports, its photo); everywhere else the server wants `input*FromMessage` — a message the peer
+   * appears in. So messages are remembered for every peer that is not fully known, as tdesktop does
+   */
+  public registerMessagePeers(message: Message.message | Message.messageService) {
+    const {peerId, mid} = message;
+    if(!peerId || !mid || isTempId(mid) || !getServerMessageId(mid)) {
+      return;
+    }
+
+    const peerIds: PeerId[] = [message.fromId, message.viaBotId, (message as Message.message).fwdFromId];
+    for(const entity of (message as Message.message).entities || []) {
+      if(entity._ === 'messageEntityMentionName') {
+        peerIds.push(entity.user_id.toPeerId(false));
+      }
+    }
+
+    const action = (message as Message.messageService).action;
+    if(action?._ === 'messageActionChatAddUser' || action?._ === 'messageActionChatAddUsers') {
+      peerIds.push(...(action.users || []).map((userId) => userId.toPeerId(false)));
+    } else if(action?._ === 'messageActionChatJoinedByLink') {
+      peerIds.push(action.inviter_id.toPeerId(false));
+    } else if(action?._ === 'messageActionChatDeleteUser') {
+      peerIds.push(action.user_id.toPeerId(false));
+    } else if(action?._ === 'messageActionChatJoinedViaCommunity') {
+      peerIds.push(action.community_id.toPeerId(true));
+    }
+
+    for(const minPeerId of peerIds) {
+      // * a peer that is not loaded yet may still arrive as `min` later
+      if(!minPeerId || minPeerId === peerId || (this.getPeer(minPeerId) && !this.isMinPeer(minPeerId))) {
+        continue;
+      }
+
+      const refs = this.messagesWithPeer.get(minPeerId) || [];
+      if(refs.some((ref) => ref.peerId === peerId && ref.mid === mid)) {
+        continue;
+      }
+
+      refs.unshift({peerId, mid});
+      refs.length = Math.min(refs.length, MESSAGES_WITH_PEER_LIMIT);
+      this.messagesWithPeer.set(minPeerId, refs);
+    }
+  }
+
+  public isMinPeer(peerId: PeerId) {
+    return !!(this.getPeer(peerId) as User.user | Chat.channel)?.pFlags?.min;
+  }
+
+  /**
+   * A message to name a `min` peer through, or nothing when the peer is complete or no such message
+   * is still around
+   */
+  public getMessageWithPeer(peerId: PeerId) {
+    const refs = this.isMinPeer(peerId) && this.messagesWithPeer.get(peerId);
+    if(!refs) {
+      return;
+    }
+
+    while(refs.length) {
+      const {peerId: messagePeerId, mid} = refs[0];
+      if(this.appMessagesManager.getMessageByPeer(messagePeerId, mid) && !this.isMinPeer(messagePeerId)) {
+        return {
+          peer: this.getInputPeerById(messagePeerId),
+          msg_id: getServerMessageId(mid)
+        };
+      }
+
+      refs.shift();
+    }
+
+    this.messagesWithPeer.delete(peerId);
+  }
+
   public canPinMessage(peerId: PeerId) {
     return peerId.isUser() || this.appChatsManager.hasRights(peerId.toChatId(), 'pin_messages');
   }
 
   public getPeerPhoto(peerId: PeerId) {
-    const peer = this.getPeer(peerId) as User.user | Chat.channel;
-    return getPeerPhoto(peer);
+    const peer = this.getPeer(peerId) as User.user | Chat;
+    return getPeerPhoto(peer, this.appPrivacyManager.getIgnoredRestrictionReasons());
   }
 
   public getPeerMigratedTo(peerId: PeerId) {
@@ -55,11 +133,7 @@ export class AppPeersManager extends AppManager {
       return;
     }
 
-    const chat = this.appChatsManager.getChat(peerId.toChatId()) as Chat.chat;
-    const migratedTo = chat?.migrated_to;
-    if(migratedTo && chat.pFlags.deactivated) {
-      return getPeerId(migratedTo);
-    }
+    return getChatMigratedTo(this.appChatsManager.getChat(peerId.toChatId()));
   }
 
   public getOutputPeer(peerId: PeerId): Peer {
@@ -68,7 +142,7 @@ export class AppPeersManager extends AppManager {
     }
 
     const chatId = peerId.toChatId();
-    if(this.appChatsManager.isChannel(chatId)) {
+    if(this.appChatsManager.isChannel(chatId) || this.isCommunity(peerId)) {
       return {_: 'peerChannel', channel_id: chatId};
     }
 
@@ -79,7 +153,10 @@ export class AppPeersManager extends AppManager {
     if(peerId.isUser()) {
       return this.appUsersManager.getUserString(peerId.toUserId());
     }
-    return this.appChatsManager.getChatString(peerId.toChatId());
+    return this.appChatsManager.getChatString(
+      peerId.toChatId(),
+      this.isCommunity(peerId)
+    );
   }
 
   public getPeerUsername(peerId: PeerId) {
@@ -102,6 +179,13 @@ export class AppPeersManager extends AppManager {
   }
 
   public getDialogPeer(peerId: PeerId): DialogPeer {
+    if(this.isCommunity(peerId)) {
+      return {
+        _: 'dialogPeerCommunity',
+        community_id: peerId.toChatId()
+      };
+    }
+
     return {
       _: 'dialogPeer',
       peer: this.getOutputPeer(peerId)
@@ -110,6 +194,10 @@ export class AppPeersManager extends AppManager {
 
   public isChannel(peerId: PeerId): boolean {
     return !peerId.isUser() && this.appChatsManager.isChannel(peerId.toChatId());
+  }
+
+  public isCommunity(peerId: PeerId): boolean {
+    return !peerId.isUser() && this.appCommunitiesManager.isCommunity(peerId.toChatId());
   }
 
   public isMegagroup(peerId: PeerId) {
@@ -121,7 +209,9 @@ export class AppPeersManager extends AppManager {
   }
 
   public isAnyGroup(peerId: PeerId): boolean {
-    return !peerId.isUser() && !this.appChatsManager.isBroadcast(peerId.toChatId());
+    return !peerId.isUser() &&
+      !this.isCommunity(peerId) &&
+      !this.appChatsManager.isBroadcast(peerId.toChatId());
   }
 
   public isLikeGroup(peerId: PeerId) {
@@ -139,6 +229,10 @@ export class AppPeersManager extends AppManager {
 
   public isBroadcast(peerId: PeerId): boolean {
     return this.isChannel(peerId) && !this.isMegagroup(peerId);
+  }
+
+  public isBroadcastGroup(peerId: PeerId): boolean {
+    return !peerId.isUser() && this.appChatsManager.isBroadcastGroup(peerId.toChatId());
   }
 
   public isBot(peerId: PeerId): boolean {
@@ -170,15 +264,15 @@ export class AppPeersManager extends AppManager {
     return callbackify(this.appPrivacyManager.getContentSettings(), (settings) => {
       if(appSettings.proMode) {
         ignoreRestrictionReasons(['all']);
-      } else {
-        ignoreRestrictionReasons([]);
-      }
-
-      if(appSettings.proMode) {
         return false;
       }
 
-      return isPeerRestricted(this.getPeer(peerId), !!settings.pFlags.sensitive_can_change);
+      ignoreRestrictionReasons([]);
+      return isPeerRestricted(
+        this.getPeer(peerId),
+        !this.appPrivacyManager.isSensitiveBlocked(settings),
+        this.appPrivacyManager.getIgnoredRestrictionReasons()
+      );
     });
   }
 
@@ -258,7 +352,11 @@ export class AppPeersManager extends AppManager {
     peerId,
     ignorePeerId,
     threadId
-  }: T): T['ignorePeerId'] extends true ? Exclude<InputNotifyPeer, InputNotifyPeer.inputNotifyPeer | InputNotifyPeer.inputNotifyForumTopic> : (T['threadId'] extends number ? InputNotifyPeer.inputNotifyForumTopic : InputNotifyPeer.inputNotifyPeer) {
+  }: T): T['ignorePeerId'] extends true ?
+    InputNotifyPeer.inputNotifyUsers | InputNotifyPeer.inputNotifyChats | InputNotifyPeer.inputNotifyBroadcasts :
+    (T['threadId'] extends number ?
+      InputNotifyPeer.inputNotifyForumTopic :
+      InputNotifyPeer.inputNotifyPeer | InputNotifyPeer.inputNotifyCommunity) {
     if(ignorePeerId) {
       if(peerId.isUser()) {
         return {_: 'inputNotifyUsers'} as any;
@@ -269,6 +367,11 @@ export class AppPeersManager extends AppManager {
           return {_: 'inputNotifyChats'} as any;
         }
       }
+    } else if(this.isCommunity(peerId)) {
+      return {
+        _: 'inputNotifyCommunity',
+        community: this.appChatsManager.getChannelInput(peerId.toChatId())
+      } as any;
     } else if(threadId) {
       return {
         _: 'inputNotifyForumTopic',
@@ -290,6 +393,9 @@ export class AppPeersManager extends AppManager {
 
     if(!peerId.isUser()) {
       const chatId = peerId.toChatId();
+      if(this.isCommunity(peerId)) {
+        return this.appChatsManager.getChannelInputPeer(chatId);
+      }
       return this.appChatsManager.getInputPeer(chatId);
     }
 
@@ -305,6 +411,13 @@ export class AppPeersManager extends AppManager {
   }
 
   public getInputDialogPeerById(peerId: PeerId | InputPeer): InputDialogPeer {
+    if(!isObject<InputPeer>(peerId) && this.isCommunity(peerId)) {
+      return {
+        _: 'inputDialogPeerCommunity',
+        community: this.appChatsManager.getChannelInput(peerId.toChatId())
+      };
+    }
+
     return {
       _: 'inputDialogPeer',
       peer: isObject<InputPeer>(peerId) ? peerId : this.getInputPeerById(peerId)
@@ -325,6 +438,8 @@ export class AppPeersManager extends AppManager {
   public getDialogType(peerId: PeerId, threadId?: number): PeerType {
     if(this.peerId === peerId && threadId) {
       return 'savedDialog';
+    } else if(this.isCommunity(peerId)) {
+      return 'community';
     } else if(this.isMonoforum(peerId)) {
       return threadId ? 'monoforum_thread' : 'monoforum';
     } else if(this.isBotforum(peerId) && threadId) {
@@ -380,6 +495,24 @@ export class AppPeersManager extends AppManager {
     MTProtoMessagePort.getInstance<false>().invokeVoid('mirror', {
       name: 'peers',
       value: peers,
+      accountNumber: this.getAccountNumber()
+    }, port);
+
+    MTProtoMessagePort.getInstance<false>().invokeVoid('mirror', {
+      name: 'communityFull',
+      value: this.appProfileManager.getCommunityFullMirror(),
+      accountNumber: this.getAccountNumber()
+    }, port);
+
+    MTProtoMessagePort.getInstance<false>().invokeVoid('mirror', {
+      name: 'communityDialogs',
+      value: this.appCommunitiesManager.getCommunityDialogsMirror(),
+      accountNumber: this.getAccountNumber()
+    }, port);
+
+    MTProtoMessagePort.getInstance<false>().invokeVoid('mirror', {
+      name: 'communityPeerLinkRequests',
+      value: this.appCommunitiesManager.getCommunityPeerLinkRequestsMirror(),
       accountNumber: this.getAccountNumber()
     }, port);
   }

@@ -1,11 +1,6 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
+import DEBUG, {MOUNT_CLASS_TO} from '@config/debug';
 import getScreenStream from '@lib/calls/helpers/getScreenStream';
-import getStream from '@lib/calls/helpers/getStream';
+import getCallStream from '@lib/calls/helpers/getCallStream';
 
 /**
  * ! Use multiple constraints together only with first invoke
@@ -38,7 +33,7 @@ export default function getStreamCached() {
     let promise: Promise<MediaStream> = cache[constraints.audio ? 'audio' : 'video'];
 
     if(!promise) {
-      promise = (isScreen ? getScreenStream : getStream)(constraints, (options as any).muted);
+      promise = (isScreen ? getScreenStream : getCallStream)(constraints, (options as any).muted);
       if(constraints.audio && !cache.audio) cache.audio = promise.finally(() => cache.audio = undefined);
       if(constraints.video && !cache.video) cache.video = promise.finally(() => cache.video = undefined);
     }
@@ -62,4 +57,4 @@ export default function getStreamCached() {
   };
 }
 
-(window as any).getStreamCached = getStreamCached;
+DEBUG && (MOUNT_CLASS_TO.getStreamCached = getStreamCached);

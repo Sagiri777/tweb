@@ -1,5 +1,7 @@
 import {createMemo, createSelector, For, JSX} from 'solid-js';
 import clamp from '@helpers/number/clamp';
+import I18n, {LangPackKey} from '@lib/langPack';
+import onRangeInlineArrowKey from '@helpers/dom/onRangeInlineArrowKey';
 
 
 export type StepInputStep<T = any> = {
@@ -9,6 +11,8 @@ export type StepInputStep<T = any> = {
 
 export default function StepInput<T = any>(props: {
   label: JSX.Element;
+  ariaLabel?: LangPackKey;
+  ariaValueText?: (value: T) => string;
   value: T;
   steps: StepInputStep[];
   onChange: (value: T) => void;
@@ -31,6 +35,8 @@ export default function StepInput<T = any>(props: {
       <div class="media-editor__step-input-wrapper">
         <input
           type="range"
+          aria-label={props.ariaLabel ? I18n.format(props.ariaLabel, true) : undefined}
+          aria-valuetext={props.ariaValueText?.(props.value)}
           min={0}
           max={props.steps.length - 1}
           step="1"
@@ -39,6 +45,7 @@ export default function StepInput<T = any>(props: {
             const newValue = Math.round(clamp(e.currentTarget.valueAsNumber, 0, props.steps.length - 1)); // just in case
             props.onChange(props.steps[newValue].value);
           }}
+          onKeyDown={onRangeInlineArrowKey}
         />
         <For each={props.steps}>
           {(_, index) => <>

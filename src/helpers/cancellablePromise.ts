@@ -1,9 +1,3 @@
-/*
- * https://github.com/morethanwords/tweb
- * Copyright (C) 2019-2021 Eduard Kuzmenko
- * https://github.com/morethanwords/tweb/blob/master/LICENSE
- */
-
 import noop from '@helpers/noop';
 
 export interface CancellablePromise<T> extends Promise<T> {
@@ -38,6 +32,14 @@ const deferredHelper = {
   addNotifyListener: function(callback: (...args: any[]) => void) {
     if(this.lastNotify) {
       callback(...this.lastNotify);
+    }
+
+    // * A finished promise notifies nobody again, and onFinish has already emptied the list: one kept
+    // * now is only a reference to whoever added it. A finished download stays in the download
+    // * manager's cache, and every bubble that redraws its media attached a preloader here - with
+    // * the bubble it belonged to - for as long as the download stayed cached
+    if(this.isFulfilled || this.isRejected) {
+      return;
     }
 
     (this.listeners ??= []).push(callback);

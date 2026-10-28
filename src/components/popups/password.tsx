@@ -1,10 +1,11 @@
-import PopupElement, {addCancelButton, PopupButton} from '.';
+import {addCancelButton, PopupButton} from '@components/popups/indexTsx';
 import deferredPromise from '@helpers/cancellablePromise';
 import {InputCheckPasswordSRP} from '@layer';
 import rootScope from '@lib/rootScope';
 import {InputState} from '@components/inputField';
 import PasswordInputField from '@components/passwordInputField';
-import PopupPeer, {PopupPeerOptions} from '@components/popups/peer';
+import showPeerPopup, {PopupPeerOptions} from '@components/popups/peer';
+import {bindManagersToSession} from '@lib/accounts/bindManagersToAccount';
 
 export async function passwordPopup<Result>(options: Omit<PopupPeerOptions, 'inputField'> & {
   button?: Omit<PopupPeerOptions['buttons'][0], 'callback'>;
@@ -26,9 +27,10 @@ export async function passwordPopup<Result>(options: Omit<PopupPeerOptions, 'inp
     langKey: options.button?.langKey ?? 'Confirm',
     langArgs: options.button?.langArgs ?? [],
     callback: async() => {
+      const managers = bindManagersToSession(rootScope.managers);
       buttonOptions.element.disabled = true
       try {
-        const inputCheckPassword = await rootScope.managers.passwordManager.getInputCheckPassword(passwordInputField.value, state);
+        const inputCheckPassword = await managers.passwordManager.getInputCheckPassword(passwordInputField.value, state);
         const result = await options.callback(inputCheckPassword);
         deferred.resolve(result);
         resolved = true;
@@ -42,7 +44,7 @@ export async function passwordPopup<Result>(options: Omit<PopupPeerOptions, 'inp
         } else {
           passwordInputField.setState(InputState.Error, 'Error.AnError')
         }
-        state = await rootScope.managers.passwordManager.getState();
+        state = await managers.passwordManager.getState();
         return false
       } finally {
         buttonOptions.element.disabled = false
@@ -50,19 +52,17 @@ export async function passwordPopup<Result>(options: Omit<PopupPeerOptions, 'inp
     }
   }
 
-  const popup = PopupElement.createPopup(PopupPeer, 'popup-confirmation', {
+  showPeerPopup('popup-confirmation', {
     ...options,
     inputField: passwordInputField,
-    buttons: addCancelButton([buttonOptions])
-  })
-
-  popup.addEventListener('closeAfterTimeout', () => {
-    if(!resolved) {
-      deferred.reject();
+    buttons: addCancelButton([buttonOptions]),
+    onCloseAfterTimeout: () => {
+      if(!resolved) {
+        deferred.reject();
+      }
     }
   });
 
-  popup.show()
 
   return deferred;
 }

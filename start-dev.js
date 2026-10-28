@@ -95,7 +95,7 @@ async function main() {
   });
 
   child.on('error', (error) => {
-    console.error('[start] Failed to start dev server:', error.message);
+    console.error('[ to start dev server:', error.message);
     process.exit(1);
   });
 }
